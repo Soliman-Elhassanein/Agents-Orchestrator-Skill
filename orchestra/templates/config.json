@@ -1,0 +1,28 @@
+{
+  "version": "orchestra.v2-adapters/1",
+  "heartbeatMinutes": 15,
+  "communicatorUpdateMinutes": 15,
+  "stuckAfterMinutes": 10,
+  "fanout": {
+    "executors": 3
+  },
+  "executorRetries": 1,
+  "knowledgeObservedLimit": 10,
+  "agentTimeout": "20m",
+  "gateTimeout": "20m",
+  "gates": [],
+  "queue": {
+    "holdOnFailure": true,
+    "buildOnPrevious": true
+  },
+  "quotaBalancing": {
+    "enabled": true,
+    "strength": 2,
+    "warnAtPercent": 90,
+    "stopAtPercent": 95
+  },
+  "agents": {},
+  "escalate": {
+    "afterFailures": 1
+  }
+}

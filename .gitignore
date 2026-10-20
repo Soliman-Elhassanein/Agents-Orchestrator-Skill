@@ -1,0 +1,10 @@
+.DS_Store
+*.swp
+node_modules/
+
+# Installed engine and runtime records
+/.orchestra/
+
+# Local development tooling
+/.specify/
+/.agents/

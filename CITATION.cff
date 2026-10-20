@@ -1,0 +1,18 @@
+cff-version: 1.2.0
+message: "If you use Orchestra, please cite it and the delegate-skills project it builds on."
+title: "Orchestra: parallel agent execution with quota balancing"
+type: software
+license: MIT
+repository-code: "https://github.com/Soliman-Elhassanein/Agents-Orchestrator-Skill"
+authors:
+  - given-names: Soliman
+    family-names: Elhassanein
+references:
+  - type: software
+    title: "delegate-skills"
+    repository-code: "https://github.com/amElnagdy/delegate-skills"
+    license: MIT
+    authors:
+      - given-names: Ahmed
+        family-names: Mohammed
+        alias: amElnagdy

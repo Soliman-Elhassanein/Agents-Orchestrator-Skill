@@ -1,0 +1,13 @@
+Orchestra
+Copyright (c) 2026 Soliman Elhassanein
+
+This project includes work derived from delegate-skills:
+  https://github.com/amElnagdy/delegate-skills
+  Copyright (c) 2026 Ahmed Mohammed (amElnagdy) and contributors
+  Licensed under the MIT License (see LICENSE).
+
+What is derived from delegate-skills:
+  - How the built-in adapters (orchestra/adapters/) invoke each CLI and read its results,
+    adapted from delegate-skills' per-CLI relay scripts.
+
+The workflow runner, blocks, queue, quota balancing, knowledge and CLI are original to Orchestra.

@@ -1,0 +1,84 @@
+{
+  "adapter": 1,
+  "command": [
+    "claude",
+    "-p",
+    "--verbose",
+    "--output-format",
+    "stream-json"
+  ],
+  "prompt": {
+    "mode": "stdin"
+  },
+  "flags": {
+    "model": [
+      "--model",
+      "{model}"
+    ],
+    "effort": [
+      "--effort",
+      "{effort}"
+    ],
+    "read": [
+      "--permission-mode",
+      "plan",
+      "--tools",
+      "Read,Glob,Grep"
+    ],
+    "write": [
+      "--permission-mode",
+      "acceptEdits",
+      "--tools",
+      "Read,Glob,Grep,Edit,Write,Bash",
+      "--settings",
+      "{\"sandbox\": {\"enabled\": true, \"failIfUnavailable\": true, \"autoAllowBashIfSandboxed\": true, \"allowUnsandboxedCommands\": false}}"
+    ]
+  },
+  "reader": [
+    "{node}",
+    "{adapterDir}/claude.mjs"
+  ],
+  "transcript": [
+    "{node}",
+    "{adapterDir}/claude.mjs"
+  ],
+  "startup": [
+    {
+      "pattern": "auto-denied|permission denied|cannot prompt|operation not permitted",
+      "what": "command permission was denied",
+      "fix": "Allow the required commands in the CLI permission settings before running headless."
+    },
+    {
+      "pattern": "unsupported model|invalid model|model .*(not supported|not found|not available)|not supported when using",
+      "what": "the model is unavailable",
+      "fix": "Choose a model supported by the logged-in account in .orchestra/config.json."
+    },
+    {
+      "pattern": "sandbox.*(unavailable|missing)|socat|bubblewrap",
+      "what": "the sandbox could not start",
+      "fix": "Install bubblewrap and socat on Linux (or the sandbox dependencies named in stderr), then retry `orchestra adapter test claude`."
+    },
+    {
+      "pattern": "not logged in|please log.?in|login required|authentication (failed|required)|invalid api key",
+      "what": "authentication is required",
+      "fix": "Run `claude login` on this machine, then retry the adapter test."
+    },
+    {
+      "pattern": "unknown (option|argument)|unrecognized (option|argument)|unexpected argument",
+      "what": "the installed CLI does not support an adapter flag",
+      "fix": "Update claude or override its adapter flags in .orchestra/adapters/claude.json to match the installed version."
+    }
+  ],
+  "suggestions": {
+    "sonnet": {
+      "model": "sonnet",
+      "effort": "high",
+      "tier": 2
+    },
+    "opus": {
+      "model": "opus",
+      "effort": "medium",
+      "tier": 3
+    }
+  }
+}

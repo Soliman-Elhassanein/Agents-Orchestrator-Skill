@@ -1,0 +1,83 @@
+{
+  "adapter": 1,
+  "command": [
+    "codex",
+    "exec",
+    "--json",
+    "-o",
+    "{outDir}/final.txt",
+    "-"
+  ],
+  "prompt": {
+    "mode": "stdin"
+  },
+  "flags": {
+    "model": [
+      "--model",
+      "{model}"
+    ],
+    "effort": [
+      "-c",
+      "model_reasoning_effort=\"{effort}\""
+    ],
+    "read": [
+      "--sandbox",
+      "read-only"
+    ],
+    "write": [
+      "--sandbox",
+      "workspace-write"
+    ]
+  },
+  "reader": [
+    "{node}",
+    "{adapterDir}/codex.mjs"
+  ],
+  "transcript": [
+    "{node}",
+    "{adapterDir}/codex.mjs"
+  ],
+  "quota": [
+    "{node}",
+    "{adapterDir}/codex.mjs"
+  ],
+  "startup": [
+    {
+      "pattern": "auto-denied|permission denied|cannot prompt|operation not permitted",
+      "what": "command permission was denied",
+      "fix": "Allow the required commands in the CLI permission settings before running headless."
+    },
+    {
+      "pattern": "unsupported model|invalid model|model .*(not supported|not found|not available)|not supported when using",
+      "what": "the model is unavailable",
+      "fix": "Choose a model supported by the logged-in account in .orchestra/config.json."
+    },
+    {
+      "pattern": "sandbox.*(unavailable|missing)|socat|bubblewrap",
+      "what": "the sandbox could not start",
+      "fix": "Install the sandbox dependencies named in stderr, or correct the CLI sandbox settings."
+    },
+    {
+      "pattern": "not logged in|please log.?in|login required|authentication (failed|required)|invalid api key",
+      "what": "authentication is required",
+      "fix": "Run `codex login` on this machine, then retry the adapter test."
+    },
+    {
+      "pattern": "unknown (option|argument)|unrecognized (option|argument)|unexpected argument",
+      "what": "the installed CLI does not support an adapter flag",
+      "fix": "Update codex or override its adapter flags in .orchestra/adapters/codex.json to match the installed version."
+    }
+  ],
+  "suggestions": {
+    "luna": {
+      "model": "gpt-6-luna",
+      "effort": "high",
+      "tier": 2
+    },
+    "sol": {
+      "model": "gpt-6.1-sol",
+      "effort": "high",
+      "tier": 3
+    }
+  }
+}

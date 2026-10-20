@@ -1,0 +1,58 @@
+{
+  "workflow": 1,
+  "budget": {
+    "calls": 6
+  },
+  "steps": [
+    {
+      "id": "describe",
+      "ask": {
+        "prompt": "describe.md"
+      }
+    },
+    {
+      "id": "draft",
+      "agent": {
+        "prompt": "draft.md",
+        "tier": 3,
+        "access": "read",
+        "outputFile": {
+          "field": "pack",
+          "path": "{{runDir}}/workflows/draft.json"
+        }
+      }
+    },
+    {
+      "id": "check",
+      "gate": {
+        "command": "node \"{{workflowDir}}/scripts/manage.mjs\" check \"{{runDir}}\" \"{{engineDir}}\" \"{{projectRoot}}\""
+      }
+    },
+    {
+      "id": "diagram",
+      "gate": {
+        "command": "node \"{{workflowDir}}/scripts/manage.mjs\" diagram \"{{runDir}}\" \"{{engineDir}}\" \"{{projectRoot}}\""
+      }
+    },
+    {
+      "id": "dry",
+      "gate": {
+        "command": "node \"{{workflowDir}}/scripts/manage.mjs\" dry \"{{runDir}}\" \"{{engineDir}}\" \"{{projectRoot}}\""
+      }
+    },
+    {
+      "id": "approve",
+      "ask": {
+        "questions": [
+          "Open {{runDir}}/workflows/workflow.drawio in draw.io or the Draw.io extension in VS Code, and inspect the gate logs. Reply exactly approve project or approve user to save the pack including its diagram, or decline."
+        ]
+      }
+    },
+    {
+      "id": "save",
+      "gate": {
+        "command": "node \"{{workflowDir}}/scripts/manage.mjs\" save \"{{runDir}}\" \"{{engineDir}}\" \"{{projectRoot}}\""
+      }
+    }
+  ]
+}

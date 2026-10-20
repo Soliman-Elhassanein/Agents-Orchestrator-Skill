@@ -1,0 +1,9 @@
+{
+  "workflow": 1,
+  "budget": {"calls": 128},
+  "steps": [
+    {"id":"tasks", "agent":{"prompt":"tasks.md", "tier":3, "access":"read",
+      "unless":"{{taskFile}}", "outputFile":{"field":"taskList", "path":"{{runDir}}/tasks.md"}}},
+    {"id":"execute", "lanes":{"taskFile":"{{steps.tasks.taskFile}}", "tier":1, "access":"write"}}
+  ]
+}

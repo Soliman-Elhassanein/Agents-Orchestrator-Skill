@@ -1,0 +1,93 @@
+{
+  "adapter": 1,
+  "command": [
+    "agy",
+    "--new-project",
+    "--add-dir",
+    "{cwd}",
+    "--print-timeout",
+    "20m",
+    "--log-file",
+    "{outDir}/events.jsonl"
+  ],
+  "prompt": {
+    "mode": "arg",
+    "args": [
+      "--print={prompt}"
+    ]
+  },
+  "flags": {
+    "model": [
+      "--model",
+      "{model}"
+    ],
+    "effort": [
+      "--effort",
+      "{effort}"
+    ],
+    "read": [
+      "--sandbox",
+      "--dangerously-skip-permissions"
+    ],
+    "write": [
+      "--sandbox",
+      "--dangerously-skip-permissions"
+    ]
+  },
+  "reader": [
+    "{node}",
+    "{adapterDir}/agy.mjs"
+  ],
+  "transcript": [
+    "{node}",
+    "{adapterDir}/agy.mjs"
+  ],
+  "quota": [
+    "{node}",
+    "{adapterDir}/agy.mjs"
+  ],
+  "startup": [
+    {
+      "pattern": "auto-denied|permission denied|cannot prompt|operation not permitted",
+      "what": "command permission was denied",
+      "fix": "Enable the required tools in Antigravity, or configure the adapter access flags for headless sandbox execution."
+    },
+    {
+      "pattern": "unsupported model|invalid model|model .*(not supported|not found|not available)|not supported when using",
+      "what": "the model is unavailable",
+      "fix": "Choose a model supported by the logged-in account in .orchestra/config.json."
+    },
+    {
+      "pattern": "sandbox.*(unavailable|missing)|socat|bubblewrap",
+      "what": "the sandbox could not start",
+      "fix": "Install the sandbox dependencies named in stderr, or correct the CLI sandbox settings."
+    },
+    {
+      "pattern": "not logged in|please log.?in|login required|authentication (failed|required)|invalid api key",
+      "what": "authentication is required",
+      "fix": "Open Antigravity and sign in, then retry `orchestra adapter test agy`."
+    },
+    {
+      "pattern": "unknown (option|argument)|unrecognized (option|argument)|unexpected argument",
+      "what": "the installed CLI does not support an adapter flag",
+      "fix": "Update agy or override its adapter flags in .orchestra/adapters/agy.json to match the installed version."
+    }
+  ],
+  "quotaKey": [
+    {
+      "pattern": "gemini",
+      "key": "agy"
+    },
+    {
+      "pattern": ".*",
+      "key": "agy-claude-gpt"
+    }
+  ],
+  "suggestions": {
+    "flash": {
+      "model": "gemini-3.8-flash-high",
+      "tier": 1,
+      "weight": 2
+    }
+  }
+}
