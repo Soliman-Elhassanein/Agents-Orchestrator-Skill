@@ -23,7 +23,6 @@ and respect its non-goals. Orchestra is a Node CLI, Node 18+, built-in modules o
 
 - Procedures belong in workflow data and prompts; guarantees belong in code.
 - Report facts: process exits, commits, gate results and logs. The user decides quality.
-- Core and blocks target at most 2,000 non-blank, non-comment lines.
 - CLI specifics belong in adapters; the core must not name workflows.
 - Prompts start with `ORCHESTRA ROLE: <role>` and `CYCLE: n`.
 - Adapter contract: versioned declarations or executables normalize results to

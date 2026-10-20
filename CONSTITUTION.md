@@ -5,7 +5,7 @@ The principles every change to Orchestra must keep.
 ## Purpose
 
 > **Get the most out of the subscriptions you already pay for.**
-> Strong models orchestrate; cheap models do the bulk of the work.
+> Code orchestrates; strong models think; cheap models do the bulk of the work.
 
 **What Orchestra does:** it orchestrates agents to get a job done, whatever the job is: code,
 research, review or deliberation.
@@ -46,7 +46,6 @@ Orchestra is not:
 
 - Make each change on its own branch; never work directly on the default branch.
 - Use Node 18 or newer and built-in modules only, with no dependencies.
-- Keep the core and blocks within 2,000 non-blank, non-comment lines.
 - Run `npm test` before every commit; it is the delivery gate. Tests use the mock agent and
   never spend model calls.
 - The engine core never names a CLI or a workflow, and nothing in the repository depends on
@@ -58,7 +57,9 @@ Orchestra is not:
 ## Governance
 
 Every change must preserve the five promises, pass the spirit test and respect the non-goals.
+The promises are kept by the engine. Workflows may be added, changed or removed without
+breaking any promise.
 Procedures belong in workflow files; reusable guarantees belong in the six blocks.
 Amend this constitution explicitly before changing the product's direction.
 
-**Version**: 1.0.1 | **Ratified**: 2026-10-20 | **Last amended**: 2026-10-20
+**Version**: 1.1.0 | **Ratified**: 2026-10-20 | **Last amended**: 2026-10-20
