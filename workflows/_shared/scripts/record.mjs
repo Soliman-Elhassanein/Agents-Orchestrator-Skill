@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 const run=process.argv[2],s=JSON.parse(readFileSync(join(run,'state.json'),'utf8'));
-const summary=s.steps.synthesize.output, answer=s.steps.decide.output.answers;
+const summary=s.steps.rounds.output.synthesis, answer=s.steps.decide.output.answers;
 let choice;try{choice=JSON.parse(answer);}catch{}
 if(choice && typeof choice==='object'){if(typeof choice.decision!=='string')throw new Error('decision text required');Object.assign(summary,choice);}
 const evidence=JSON.parse(readFileSync(join(run,'verification.json'),'utf8'));

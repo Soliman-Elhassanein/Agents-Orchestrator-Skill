@@ -191,14 +191,14 @@ const tests={
     const first=orchRaw(dir,['run','ask me'],{MOCK_QUESTIONS:'1'});
     assert.equal(first.code,0,first.err);assert.match(first.out,/EVENT questions/);
     const s=state(dir);assert.equal(s.status,'awaiting_user');assert.ok(first.out.includes(s.id));
-    assert.equal(report(dir).tokens.calls,1);
+    assert.equal(report(dir).tokens.calls,2);
     let returned=false;
     const watching=orchAsync(dir,['watch','--every','0']).then(r=>{returned=true;return r;});
     await new Promise(r=>setTimeout(r,350));assert.equal(returned,false);
-    assert.equal(report(dir).tokens.calls,1);
+    assert.equal(report(dir).tokens.calls,2);
     orch(dir,['answer','1. pg 2. example']);
     const next=await watching;assert.equal(next.code,0);assert.match(next.out,/EVENT finished/);
-    assert.doesNotMatch(next.out,/EVENT questions/);assert.equal(report(dir).tokens.calls,2);
+    assert.doesNotMatch(next.out,/EVENT questions/);assert.equal(report(dir).tokens.calls,3);
   },
   'run watches: detach returns before the mock completes and prints the eventual run id'() {
     const dir=project();const result=orchRaw(dir,['run','slow job','--detach'],{MOCK_DELAY:'1800'});
@@ -257,24 +257,25 @@ const tests={
     assert.equal(orchRaw(dir,['adapter','test','mock']).code,0);
     assert.throws(()=>loadAdapter(dir,'../bad'),/invalid adapter/);
   },
-  'step 3: startup handover stays at the same tier, records exact fixes, never briefs a retry'() {
+  'step 3: startup handover stays at the same tier, records exact fixes, never diagnoses startup failures'() {
     const agents={bad:{cli:'mock',model:'broken',tier:2,weight:100000},good:{cli:'mock',model:'good',tier:2,weight:0.00001},strong:{cli:'mock',model:'strong',tier:3}};
     const dir=project({agents});orch(dir,['run','one task','--foreground'],{MOCK_STARTUP:'broken'});
-    const s=state(dir),r=report(dir);assert.equal(s.status,'completed',s.error);assert.equal(r.tokens.calls,2);
-    assert.equal(r.calls[0].status,'startup-failed');assert.equal(r.calls[1].entry,'good');
-    assert.equal(s.steps.task.failures,0);assert.match(s.unavailable.bad.fix,/Repair/);
-    assert.doesNotMatch(readFileSync(join(dir,'.orchestra/runs',s.id,r.calls[1].log,'brief.md'),'utf8'),/Previous attempt/);
-    assert.ok(!existsSync(join(dir,'.orchestra/runs',s.id,r.calls[0].log,'unfinished.patch')));
+    const s=state(dir),r=report(dir);assert.equal(s.status,'completed',s.error);assert.equal(r.tokens.calls,3);
+    assert.equal(r.calls[1].status,'startup-failed');assert.equal(r.calls[2].entry,'good');
+    assert.equal(r.calls.filter(c=>c.purpose==='diagnosis').length,0);assert.equal(s.steps.task.failures,0);assert.match(s.unavailable.bad.fix,/Repair/);
+    assert.doesNotMatch(readFileSync(join(dir,'.orchestra/runs',s.id,r.calls[2].log,'brief.md'),'utf8'),/Previous attempt/);
+    assert.ok(!existsSync(join(dir,'.orchestra/runs',s.id,r.calls[1].log,'unfinished.patch')));
   },
   'step 3: model tiers use quota weights, go up when empty and never down'() {
     const dir=project();writeFileSync(join(dir,'.orchestra/quota.json'),JSON.stringify({providers:{mock:{limitReached:'limit',observedAt:new Date().toISOString(),windows:[]},up:{windows:[{name:'weekly',usedPercent:10}]}}}));
     const file=join(dir,'.orchestra/config.json'),cfg=JSON.parse(readFileSync(file));cfg.agents.strong.quotaFrom='up';writeFileSync(file,JSON.stringify(cfg));
     orch(dir,['run','one task','--foreground']);const r=report(dir);assert.equal(r.calls[0].entry,'strong');assert.equal(r.tokens.calls,1);
   },
-  'step 3: ordinary failures get one bounded digest and escalate; incomplete usage stays explicit'() {
-    const dir=project();orch(dir,['run','one task','--foreground'],{MOCK_FAIL:'medium'});
-    const r=report(dir);assert.deepEqual(r.calls.map((c)=>c.entry),['medium','strong']);assert.equal(r.tokens.tokens,2500);
-    const brief=readFileSync(join(dir,'.orchestra/runs',state(dir).id,r.calls[1].log,'brief.md'),'utf8');assert.match(brief,/Previous attempt[\s\S]*npm test/);
+  'step 3: diagnosed retries precede escalation; incomplete usage stays explicit'() {
+    const dir=project({executorRetries:2});orch(dir,['run','one task','--foreground'],{MOCK_FAIL:'medium'});
+    const r=report(dir);assert.deepEqual(r.calls.map((c)=>c.entry),['strong','medium','strong','medium','strong','strong']);assert.equal(r.tokens.tokens,7500);
+    assert.deepEqual(r.calls.filter(c=>c.purpose).map(c=>c.purpose),['brief','diagnosis','diagnosis']);
+    const brief=readFileSync(join(dir,'.orchestra/runs',state(dir).id,r.calls[3].log,'brief.md'),'utf8');assert.match(brief,/Previous attempt[\s\S]*npm test/);
     const other=project({agents:{u:{cli:'mock',model:'unreported',tier:2}}});orch(other,['run','one task','--foreground']);assert.deepEqual(report(other).tokens,{calls:1,tokens:0,unreported:1});
   },
   'step 4: six blocks, structured outputs, bounded loops and independent parallel sessions'() {
@@ -282,8 +283,8 @@ const tests={
       {id:'repeat',loop:{max:2,until:{step:'check',field:'stop',equals:true},steps:[{id:'check',agent:{prompt:'read.md',tier:1}}]}},
       {id:'verify',gate:{command:'test ! -d mock-output'}}];
     workflow(dir,'sample',steps);orch(dir,['run','sample','learn this','--foreground']);const r=report(dir);
-    assert.equal(r.status,'completed',state(dir).error);assert.equal(r.tokens.calls,4);assert.equal(r.steps.repeat.iteration,1);
-    const calls=r.calls.filter((c)=>c.step.startsWith('views/'));assert.equal(calls.length,2);
+    assert.equal(r.status,'completed',state(dir).error);assert.equal(r.tokens.calls,5);assert.equal(r.steps.repeat.iteration,1);
+    const calls=r.calls.filter((c)=>c.step.startsWith('views/') && !c.purpose);assert.equal(calls.length,2);
     const briefs=calls.map((c)=>readFileSync(join(dir,'.orchestra/runs',state(dir).id,c.log,'brief.md'),'utf8'));
     assert.ok(briefs.every((b)=>b.includes('"research"') && !b.includes('"views"')));
     assert.equal(r.gates[0].exit,0);assert.equal(r.gates[0].revision,r.baseCommit);
@@ -313,7 +314,7 @@ const tests={
     const dir=project({gates:['test -f mock-output/T001.txt && test -f mock-output/T002.txt']});
     const original='# Tasks\r\nKeep this text.\r\n## Phase 1: Work\r\n- [ ] T001 [P] [X] Write one\r\n- [ ] T002 [P] Write two\r\n- [ ] T003 Wire both\r\n\r\n## Phase 2: More\r\n- [ ] T004 Add last\r\n';
     taskFile(dir,original);orch(dir,['run','code','--task-file','tasks.md','--foreground']);const s=state(dir),r=report(dir);
-    assert.equal(s.status,'completed',s.error);assert.equal(r.tokens.calls,4);assert.deepEqual(r.tasks.map((t)=>t.status),['executed','executed','executed','executed']);
+    assert.equal(s.status,'completed',s.error);assert.equal(r.tokens.calls,6);assert.deepEqual(r.tasks.map((t)=>t.status),['executed','executed','executed','executed']);
     const show=(f)=>sh(dir,'git',['show',`${s.branch}:${f}`]);
     assert.equal(show('tasks.md'),original.replaceAll('- [ ]','- [x]'));
     assert.equal(readFileSync(join(dir,'tasks.md'),'utf8'),original,'source checkout stays isolated');
@@ -323,22 +324,22 @@ const tests={
   },
   'step 5: generated task list uses a tier-3 call then cheap lanes'() {
     const dir=project();orch(dir,['run','code','make two changes','--foreground']);const s=state(dir),r=report(dir);
-    assert.equal(s.status,'completed',s.error);assert.deepEqual(r.calls.map((c)=>c.entry),['strong','small','small']);
+    assert.equal(s.status,'completed',s.error);assert.deepEqual(r.calls.map((c)=>c.entry),['strong','strong','small','small']);
     assert.equal(r.tasks.length,2);assert.match(readFileSync(join(dir,'.orchestra/runs',s.id,'tasks.md'),'utf8'),/\[x\] T001/);
   },
   'step 5: no-changes prevents dependent work and ticks; failed gates never tick'() {
     const dir=project();taskFile(dir,'## Phase 1: Work\n- [ ] T001 Make nothing\n- [ ] T002 Depends on first\n');
     assert.equal(orchRaw(dir,['run','code','--task-file','tasks.md','--foreground'],{MOCK_NOOP:'T001'}).code,1);
-    const r=report(dir);assert.equal(r.tokens.calls,1);assert.equal(r.steps['execute/T001'].status,'no-changes');assert.equal(r.status,'failed');
+    const r=report(dir);assert.equal(r.tokens.calls,4);assert.equal(r.steps['execute/T001'].status,'no-changes');assert.equal(r.status,'failed');
     assert.doesNotMatch(sh(dir,'git',['show',`${state(dir).branch}:tasks.md`]),/\[x\]/);
     const gated=project();taskFile(gated,'## Phase 1: Work\n- [ ] T001 Write one\n');
     assert.equal(orchRaw(gated,['run','code','--task-file','tasks.md','--gate','echo detail; exit 7','--foreground']).code,1);
-    const gr=report(gated);assert.equal(gr.gates[0].exit,7);assert.equal(gr.gates[0].command,'echo detail; exit 7');assert.equal(gr.gates[0].revision,gr.finalCommit);
+    const gr=report(gated);assert.equal(gr.gates[0].exit,7);assert.equal(gr.gates[0].command,'echo detail; exit 7');assert.ok(gr.gates.every(g=>g.revision));assert.equal(gr.gates.at(-1).revision,gr.finalCommit);
     assert.equal(gr.tasks[0].status,'skipped');assert.doesNotMatch(sh(gated,'git',['show',`${state(gated).branch}:tasks.md`]),/\[x\]/);
   },
-  'step 5: direct job has one call, config and repeated gate overrides; land needs explicit branch'() {
+  'step 5: direct job has brief and worker calls, config and repeated gate overrides; land needs explicit branch'() {
     const dir=project({gates:['exit 7']});orch(dir,['run','simple job','--tier','1','--gate','test -f mock-output/direct.txt','--gate','echo artifact > generated.txt','--foreground']);
-    const r=report(dir);assert.equal(r.tokens.calls,1);assert.equal(r.calls[0].entry,'small');assert.equal(r.gates.length,2);
+    const r=report(dir);assert.equal(r.tokens.calls,2);assert.equal(r.calls[1].entry,'small');assert.equal(r.gates.length,2);
     assert.doesNotMatch(sh(dir,'git',['ls-tree','-r','--name-only',state(dir).branch]),/generated.txt/);
     assert.match(orchRaw(dir,['land']).err,/name the target explicitly/);sh(dir,'git',['branch','target']);orch(dir,['land','target']);
     assert.equal(sh(dir,'git',['branch','--show-current']).trim(),'target');assert.ok(existsSync(join(dir,'mock-output/direct.txt')));
@@ -348,19 +349,19 @@ const tests={
     const dir=project({fanout:{executors:1}});taskFile(dir,'## Phase 1: Work\n- [ ] T001 First\n- [ ] T002 Second\n');
     orch(dir,['run','code','--task-file','tasks.md','--detach'],{MOCK_CRASH_TITLE:'T002'});
     waitFor(()=>state(dir).status==='crashed','lane crash');const before=report(dir);assert.equal(before.steps['execute/T001'].status,'completed');
-    orch(dir,['resume']);waitFor(()=>state(dir).status==='completed','lane resume');const r=report(dir);assert.equal(r.tokens.calls,3);assert.equal(r.tokens.unreported,1);assert.equal(r.steps['execute/T001'].attempts.length,1);
+    orch(dir,['resume']);waitFor(()=>state(dir).status==='completed','lane resume');const r=report(dir);assert.equal(r.tokens.calls,4);assert.equal(r.tokens.unreported,1);assert.equal(r.steps['execute/T001'].attempts.length,1);
     assert.match(sh(dir,'git',['show',`${state(dir).branch}:tasks.md`]),/\[x\] T002/);
   },
   'step 4: conflicts redo once on the merged revision with no planning call'() {
     const dir=project();taskFile(dir,'## Phase 1: Work\n- [ ] T001 [P] First\n- [ ] T002 [P] Second\n');
     orch(dir,['run','code','--task-file','tasks.md','--foreground'],{MOCK_CONFLICT:'1'});const r=report(dir);
-    assert.equal(r.status,'completed',state(dir).error);assert.equal(r.tokens.calls,3);assert.ok(r.steps.execute.lanes.T002.redo);
+    assert.equal(r.status,'completed',state(dir).error);assert.equal(r.tokens.calls,4);assert.ok(r.steps.execute.lanes.T002.redo);
     assert.equal(sh(dir,'git',['show',`${state(dir).branch}:shared.txt`]),'T002 [P] Second\n');
   },
   'queue, questions from an agent, steering, quota waiting and records use no idle calls'() {
     const dir=project();orch(dir,['run','one job','--detach'],{MOCK_QUESTIONS:'1'});waitFor(()=>state(dir).status==='awaiting_user','agent questions');
-    assert.equal(report(dir).tokens.calls,1);orch(dir,['steer','use the chosen name']);orch(dir,['answer','1. pg 2. chosen']);waitFor(()=>state(dir).status==='completed','direct answers');
-    assert.equal(report(dir).tokens.calls,2);assert.equal(state(dir).directions[0].text,'use the chosen name');
+    assert.equal(report(dir).tokens.calls,2);orch(dir,['steer','use the chosen name']);orch(dir,['answer','1. pg 2. chosen']);waitFor(()=>state(dir).status==='completed','direct answers');
+    assert.equal(report(dir).tokens.calls,3);assert.equal(state(dir).directions[0].text,'use the chosen name');
     const waiting=project({agents:{only:{cli:'mock',model:'one',tier:1}}});orch(waiting,['run','higher tier needed','--detach']);waitFor(()=>state(waiting).status==='awaiting_quota','quota wait');
     assert.equal(report(waiting).tokens.calls,0);orch(waiting,['stop']);waitFor(()=>state(waiting).status==='stopped','stop quota wait');
     assert.equal(report(waiting).tokens.calls,0);
@@ -424,7 +425,7 @@ require('node:fs').writeSync(1,'Gemini Models\\tFive Hour limit remaining\\t75%\
     cpSync(join(dir,'.orchestra/adapters/mock.json'),join(dir,'.orchestra/adapters/other.json'));
     workflow(dir,'independent',[{id:'views',parallel:{prompt:'read.md',tier:3,count:2,distinct:'vendor'}}]);
     orch(dir,['run','independent','compare','--foreground'],{MOCK_STARTUP:'broken'});const r=report(dir);assert.equal(r.status,'completed',state(dir).error);
-    const children=['views/0','views/1'].map((k)=>r.steps[k]);assert.equal(new Set(children.map((e)=>e.cli)).size,2);assert.equal(r.tokens.calls,3);
+    const children=['views/0','views/1'].map((k)=>r.steps[k]);assert.equal(new Set(children.map((e)=>e.cli)).size,2);assert.equal(r.tokens.calls,4);
     const override=project();workflow(override,'code',[{id:'cheap',agent:{prompt:'read.md',agent:'small'}}]);orch(override,['run','code','custom procedure','--foreground']);
     assert.equal(report(override).tokens.calls,1);assert.equal(report(override).calls[0].entry,'small');assert.equal(report(override).tasks.length,0);
   },
@@ -432,21 +433,21 @@ require('node:fs').writeSync(1,'Gemini Models\\tFive Hour limit remaining\\t75%\
     const dir=project({agents:{only:{cli:'mock',model:'good',tier:3}}});
     workflow(dir,'independent',[{id:'views',parallel:{prompt:'read.md',tier:3,count:3,distinct:'vendor'}}]);
     orch(dir,['run','independent','compare','--foreground']);const r=report(dir);assert.equal(r.status,'completed',state(dir).error);
-    assert.equal(r.tokens.calls,3);assert.deepEqual(['views/0','views/1','views/2'].map((k)=>r.steps[k].cli),['mock','mock','mock']);
+    assert.equal(r.tokens.calls,4);assert.deepEqual(['views/0','views/1','views/2'].map((k)=>r.steps[k].cli),['mock','mock','mock']);
   },
   'step 4: a repeated merge conflict waits for the user and makes no resolution call'() {
     const dir=project();taskFile(dir,'## Phase 1: Work\n- [ ] T001 [P] First\n- [ ] T002 [P] Second\n');
     orch(dir,['run','code','--task-file','tasks.md','--detach'],{MOCK_CONFLICT:'1',MOCK_REPEAT_CONFLICT:'1'});
-    waitFor(()=>state(dir).status==='awaiting_user','repeated conflict');const s=state(dir),r=report(dir);assert.equal(r.tokens.calls,3);
+    waitFor(()=>state(dir).status==='awaiting_user','repeated conflict');const s=state(dir),r=report(dir);assert.equal(r.tokens.calls,4);
     const lane=s.steps.execute.lanes.T002.branch;
     sh(dir,'git',['checkout',lane]);sh(dir,'git',['merge','-s','ours','--no-ff','-m','resolve lane ancestry',s.branch]);sh(dir,'git',['checkout','main']);
-    orch(dir,['answer','Resolved the lane branch.']);waitFor(()=>state(dir).status==='completed','user conflict resolution');assert.equal(report(dir).tokens.calls,3);
+    orch(dir,['answer','Resolved the lane branch.']);waitFor(()=>state(dir).status==='completed','user conflict resolution');assert.equal(report(dir).tokens.calls,4);
   },
   'step 3: all exhausted agents wait without calls and refresh into a higher tier'() {
     const dir=project();writeFileSync(join(dir,'.orchestra/quota.json'),JSON.stringify({providers:{mock:{limitReached:'limit',observedAt:new Date().toISOString(),windows:[]}}}));
     orch(dir,['run','wait for quota','--detach'],{ORCHESTRA_QUOTA_POLL_MS:'100'});waitFor(()=>state(dir).status==='awaiting_quota','all exhausted');assert.equal(report(dir).tokens.calls,0);
     assert.match(orchRaw(dir,['check']).out,/requested tier or higher/);
-    writeFileSync(join(dir,'.orchestra/quota.json'),JSON.stringify({providers:{}}));waitFor(()=>state(dir).status==='completed','quota recovered');assert.equal(report(dir).tokens.calls,1);
+    writeFileSync(join(dir,'.orchestra/quota.json'),JSON.stringify({providers:{}}));waitFor(()=>state(dir).status==='completed','quota recovered');assert.equal(report(dir).tokens.calls,2);
   },
   'step 5: direct read tasks return information; missing adapters hand over without planning'() {
     const read=project();orch(read,['run','explain the project','--access','read','--foreground']);const r=report(read);assert.equal(r.tokens.calls,1);assert.equal(r.steps.task.status,'completed');assert.equal(r.finalCommit,r.baseCommit);
@@ -494,13 +495,13 @@ Object.assign(tests, {
     for(const n of ['second','third'])cpSync(join(dir,'.orchestra/adapters/mock.json'),join(dir,'.orchestra/adapters',n+'.json'));
     orch(dir,['run','council','Which option?','--detach'],{MOCK_EVIDENCE:'1'});waitFor(()=>state(dir).status==='awaiting_user','frame');
     assert.equal(report(dir).tokens.calls,0);orch(dir,['answer','Compare two approaches.']);waitFor(()=>state(dir).questions?.origin==='decide','council decision');
-    const r=report(dir),runDir=join(dir,'.orchestra/runs',state(dir).id);assert.equal(r.tokens.calls,8);assert.equal(new Set(r.calls.filter(c=>c.step.startsWith('proposals/')).map(c=>r.steps[c.step].cli)).size,3);
+    const r=report(dir),runDir=join(dir,'.orchestra/runs',state(dir).id);assert.equal(r.tokens.calls,9);assert.equal(new Set(r.calls.filter(c=>c.step.startsWith('proposals/') && !c.purpose).map(c=>r.steps[c.step].cli)).size,3);
     const verify=JSON.parse(readFileSync(join(runDir,'verification.json')));assert.ok(verify.verified>0);assert.ok(verify.unverified>0);
-    for(const c of r.calls.filter(c=>c.step.includes('/critique/'))){const brief=readFileSync(join(runDir,c.log,'brief.md'),'utf8');const inputs=brief.split('Inputs: ')[1].split('Questions already answered:')[0];assert.doesNotMatch(inputs,/response from first|response from second|response from third/);assert.match(inputs,/Peer 1/);}
+    for(const c of r.calls.filter(c=>c.step.includes('/critique/') && !c.purpose)){const brief=readFileSync(join(runDir,c.log,'brief.md'),'utf8');const inputs=brief.split('Inputs: ')[1].split('Questions already answered:')[0];assert.doesNotMatch(inputs,/response from first|response from second|response from third/);assert.match(inputs,/Peer 1/);}
     orch(dir,['answer','Choose the first approach because its evidence matches.']);waitFor(()=>state(dir).status==='completed','record');
     const text=readFileSync(join(runDir,'decision.md'),'utf8');for(const heading of ['# Decision:','Date:','Question:','## Decision','## Rejected options','## Open questions','## Sources'])assert.ok(text.includes(heading));assert.match(text,/Choose the first approach/);assert.match(text,/unverified/);
     assert.equal(report(dir).baseCommit,report(dir).finalCommit);assert.equal(sh(dir,'git',['status','--porcelain']).trim(),'');
-    for(const name of ['council-compare','council-learn','council-review'])assert.match(orch(dir,['workflow','run',name,'--dry']),/11\/16/);
+    for(const name of ['council-compare','council-learn','council-review'])assert.match(orch(dir,['workflow','run',name,'--dry']),/13\/16/);
   }
 });
 Object.assign(tests, {
@@ -573,6 +574,102 @@ Object.assign(tests, {
     orch(dir,['run','new-workflow','draft this','--detach'],{MOCK_PACK_FILE:pack});waitFor(()=>state(dir).status==='awaiting_user','bad draft description');orch(dir,['answer','Build it.']);waitFor(()=>state(dir).status==='failed','code rejection');assert.equal(report(dir).gates[0].exit,1);assert.equal(existsSync(join(dir,'.orchestra/workflows/bad')),false);
     const other=project(),good=join(other,'good-pack.json');writeFileSync(good,JSON.stringify({name:'declined',files:{'workflow.json':JSON.stringify({workflow:1,budget:{calls:1},steps:[{id:'ask',ask:{questions:['Choose?']}}]})}}));
     orch(other,['run','new-workflow','draft this','--detach'],{MOCK_PACK_FILE:good});waitFor(()=>state(other).status==='awaiting_user','description');orch(other,['answer','Build it.']);waitFor(()=>state(other).questions?.origin==='approve','declined approval');orch(other,['answer','decline']);waitFor(()=>state(other).status==='completed','decline');assert.equal(existsSync(join(other,'.orchestra/workflows/declined')),false);
+  }
+});
+Object.assign(tests, {
+  'constitution: public core stays independent of CLIs and workflows'() {
+    const walk=(dir)=>readdirSync(dir,{withFileTypes:true}).flatMap(e=>e.isDirectory()?walk(join(dir,e.name)):[join(dir,e.name)]);
+    const clis=[...new Set([...readdirSync(join(REPO,'orchestra/adapters')).map(n=>n.replace(/\.[^.]+$/,'')),
+      'antigravity','gemini','aider','cline','copilot','cursor','grok','kimi','opencode','qoder','warp','vibe','zcode','commandcode','muse','omp'])];
+    const names=readdirSync(join(REPO,'workflows')).filter(n=>n!=='_shared');
+    const forbidden=(text)=>{
+      // "code" is also an exit-code property and the public lesson scope; those uses are not workflow names.
+      text=text.replace(/\['project','code'\]/g,"[]");
+      return [...clis,...names.filter(n=>n!=='code')].some(n=>new RegExp(`\\b${n}\\b`,'i').test(text)) ||
+        /["'`]code["'`]|\bcode\s+workflow\b|\bworkflow\s+code\b/i.test(text);
+    };
+    for(const path of [...walk(join(REPO,'orchestra/lib')),...walk(join(REPO,'orchestra/bin'))])assert.equal(forbidden(readFileSync(path,'utf8')),false,path);
+    assert.equal(forbidden(readFileSync(join(REPO,'CONSTITUTION.md'),'utf8')),false);
+    for(const name of [...clis,...names])assert.equal(forbidden(`const workflow = '${name}';`),true,name);
+  },
+  'promise 1: ad-hoc lanes plan and batch phase briefs without built-ins'() {
+    const dir=project();rmSync(join(dir,'.orchestra/engine/workflows'),{recursive:true});
+    workflow(dir,'minimal',[{id:'work',lanes:{tier:1}}]);
+    const log=join(dir,'.orchestra/call-log.jsonl');
+    orch(dir,['run','minimal','make changes','--foreground'],{MOCK_CALL_LOG:log});const r=report(dir);
+    const logged=readFileSync(log,'utf8').trim().split('\n').map(JSON.parse);assert.ok(logged.filter(c=>['plan','brief'].includes(c.role)).every(c=>c.readOnly));
+    assert.deepEqual(r.calls.map(c=>c.purpose ?? c.entry),['plan','brief','small','small']);
+    assert.ok(r.calls.filter(c=>c.purpose).every(c=>c.entry==='strong'));
+    for(const id of ['T001','T002']) {
+      const c=r.calls.find(c=>c.step===`work/${id}`), text=readFileSync(join(dir,'.orchestra/runs',state(dir).id,c.log,'brief.md'),'utf8');
+      assert.match(text,/Prepared brief/);assert.ok(text.includes(id));
+    }
+    assert.equal(r.steps.work.phases.length,1);assert.equal(r.tasks.filter(t=>t.status==='executed').length,2);
+  },
+  'promise 1: ad-hoc cheap writes receive briefs; top-tier writes need none'() {
+    for(const tier of [1,3]) {
+      const dir=project();rmSync(join(dir,'.orchestra/engine/workflows'),{recursive:true});
+      workflow(dir,'minimal',[{id:'write',agent:{prompt:'write.md',tier,access:'write'}}]);
+      orch(dir,['run','minimal','change files','--foreground']);const r=report(dir);
+      assert.deepEqual(r.calls.map(c=>c.purpose ?? c.entry),tier===1?['brief','small']:['strong']);
+      const c=r.calls.at(-1), text=readFileSync(join(dir,'.orchestra/runs',state(dir).id,c.log,'brief.md'),'utf8');
+      if(tier===1)assert.match(text,/Prepared brief/);
+    }
+  },
+  'promise 1: write errors, empty writes and timeouts diagnose before same-tier retry'() {
+    for(const env of [{MOCK_FAIL:'first'},{MOCK_NOOP:'first'},{MOCK_TIMEOUT_FIRST:'1'}]) {
+      const dir=project({agentTimeout:'1s',escalate:{afterFailures:1}});
+      workflow(dir,'minimal',[{id:'write',agent:{prompt:'write.md',tier:1,access:'write'}}]);
+      orch(dir,['run','minimal','change files','--foreground'],env);const r=report(dir);
+      assert.deepEqual(r.calls.map(c=>c.purpose ?? c.entry),['brief','small','diagnosis','small']);
+      const diagnosis=r.calls[2],worker=r.calls[3],runDir=join(dir,'.orchestra/runs',state(dir).id);
+      assert.match(readFileSync(join(runDir,diagnosis.log,'brief.md'),'utf8'),/Previous attempt failed/);
+      assert.match(readFileSync(join(runDir,worker.log,'brief.md'),'utf8'),/Revised brief/);
+      assert.equal(r.steps.write.failures,1);
+    }
+  },
+  'promise 1: attributable gates diagnose direct writes and lane tasks before repair'() {
+    for(const lanes of [false,true,'parallel']) {
+      const dir=project({gates:['test -f repaired.txt']});
+      if(lanes===true)taskFile(dir,'## Phase 1: Work\n- [ ] T001 Repair the file\n');
+      workflow(dir,'minimal',lanes===true?[{id:'work',lanes:{taskFile:'tasks.md',tier:1}}]:lanes==='parallel'?[{id:'views',parallel:{prompt:'write.md',tier:1,access:'write',count:1}}]:[{id:'write',agent:{prompt:'write.md',tier:1,access:'write'}}]);
+      orch(dir,['run','minimal','change files','--foreground'],{MOCK_GATE_REPAIR:'1'});const r=report(dir);
+      assert.deepEqual(r.calls.map(c=>c.purpose ?? c.entry),lanes==='parallel'?['brief','small','synthesis','diagnosis','small']:['brief','small','diagnosis','small']);
+      assert.deepEqual(r.gates.map(g=>g.exit),[1,0]);
+      const c=r.calls.find(c=>c.purpose==='diagnosis');assert.match(readFileSync(join(dir,'.orchestra/runs',state(dir).id,c.log,'brief.md'),'utf8'),/test -f repaired.txt/);
+      if(lanes===true) {assert.equal(r.tasks[0].status,'executed');assert.equal(r.tasks[0].attempts,2);}
+    }
+  },
+  'promise 1: ad-hoc parallel retains items and engine synthesis'() {
+    const dir=project();rmSync(join(dir,'.orchestra/engine/workflows'),{recursive:true});
+    workflow(dir,'minimal',[{id:'views',parallel:{prompt:'read.md',tier:1,count:2}}]);
+    orch(dir,['run','minimal','compare views','--foreground']);const r=report(dir);
+    assert.deepEqual(r.calls.map(c=>c.purpose ?? c.entry),['small','small','synthesis']);
+    assert.equal(r.steps.views.output.items.length,2);assert.match(r.steps.views.output.synthesis.text,/Agreement and disagreement/);
+    assert.equal(r.calls.at(-1).entry,'strong');
+    assert.equal(r.baseCommit,r.finalCommit);
+  },
+  'promise 1: interrupted diagnosis resumes before the same-tier worker'() {
+    const dir=project();workflow(dir,'minimal',[{id:'write',agent:{prompt:'write.md',tier:1,access:'write'}}]);
+    orch(dir,['run','minimal','change files','--detach'],{MOCK_FAIL:'first',MOCK_CRASH_ROLE:'diagnosis'});
+    waitFor(()=>state(dir).status==='crashed','diagnosis crash');
+    assert.deepEqual(report(dir).calls.map(c=>c.purpose ?? c.entry),['brief','small','diagnosis']);
+    orch(dir,['resume']);waitFor(()=>state(dir).status==='completed','diagnosis resume');
+    const r=report(dir);assert.deepEqual(r.calls.map(c=>c.purpose ?? c.entry),['brief','small','diagnosis','diagnosis','small']);
+    assert.equal(r.calls[2].status,'interrupted');assert.equal(r.steps.write.failures,1);
+  },
+  'promise 1: strong calls obey budgets and wait for top-tier quota without falling down'() {
+    const budget=project();workflow(budget,'minimal',[{id:'write',agent:{prompt:'write.md',tier:1,access:'write'}}],1);
+    assert.equal(orchRaw(budget,['run','minimal','change files','--foreground']).code,1);
+    assert.deepEqual(report(budget).calls.map(c=>c.purpose),['brief']);
+    const dir=project(),cfgPath=join(dir,'.orchestra/config.json'),cfg=JSON.parse(readFileSync(cfgPath));
+    cfg.agents.strong.quotaFrom='top';writeFileSync(cfgPath,JSON.stringify(cfg));
+    writeFileSync(join(dir,'.orchestra/quota.json'),JSON.stringify({providers:{top:{limitReached:'limit',observedAt:new Date().toISOString(),windows:[]}}}));
+    orch(dir,['run','change files','--detach'],{ORCHESTRA_QUOTA_POLL_MS:'100'});
+    waitFor(()=>state(dir).status==='awaiting_quota','strong quota wait');assert.equal(report(dir).tokens.calls,0);
+    writeFileSync(join(dir,'.orchestra/quota.json'),JSON.stringify({providers:{}}));
+    waitFor(()=>state(dir).status==='completed','strong quota recovery');
+    assert.deepEqual(report(dir).calls.map(c=>c.purpose ?? c.entry),['brief','medium']);
   }
 });
 const only=process.argv[2];let failed=0;

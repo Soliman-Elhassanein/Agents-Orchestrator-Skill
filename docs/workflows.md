@@ -54,31 +54,53 @@ installed copy; it rejects stale supplied diagrams. Source packs are left untouc
   default or `write`), optional `sees`, optional `outputFile` (save an output field using
   `{field,path}`), and `unless` (skip when its input is present). `outputFile` paths must be
   inside the run folder. Write steps need a real diff, including commits the agent made.
-  Failures retry with a bounded digest, then move up tiers after `escalate.afterFailures`.
+  Before a write below the highest configured tier, the engine makes one read-only brief
+  call at that highest tier. The worker receives that brief. Write failures (including errors,
+  timeouts and empty writes) get a highest-tier diagnosis and rewritten brief before retrying
+  on the original tier. Escalation uses `escalate.afterFailures`, after at least one diagnosed
+  retry on that tier. A directly following gate or final configured gate can trigger the same
+  recovery for the write it tests. Read failures retry with a bounded digest.
   Startup failures exclude that entry and hand over without a digest or escalation count.
 - `parallel`: the agent fields plus `count` (default 2), optional `distinct:"vendor"`: each agent
   comes from a different vendor when enough are available; otherwise the rest are filled from any
   available agents. Every agent still runs in its own session.
   Vendor identity is `cli` from the agent map. Each child uses a separate session and
   detached worktree at the same revision. Write children merge after all calls return.
+  The engine then makes a read-only synthesis call at the highest configured tier. Output is
+  `{items:[...],synthesis:{...}}`: raw child outputs remain in `items`; synthesis describes
+  agreement, disagreement and reasons, options and open questions. Later steps can read
+  `{{steps.choices.synthesis}}`. This happens for every parallel block, including inside loops.
 - `ask`: `questions` (strings), or `prompt` (a file of text for the user). Waits for
   `orchestra answer`; it makes no calls. All numbered questions must be answered.
 - `gate`: `command` (shell command). Records exit, log and tested revision. Runs in a
   detached worktree; build artifacts do not become project changes. A nonzero exit stops
-  dependent steps. Configured gates apply to direct runs and after every task phase;
+  dependent steps after any attributable write recovery exhausts its retries. Configured gates apply to direct runs and
+  after every task phase;
   repeated `run --gate` overrides config gates.
 - `loop`: `steps`, positive `max`, `until:{step,field,equals}`. Checks a structured field
   after each iteration; never interprets prose. The maximum is a hard bound; if the field
   never matches, the block stops with `exhausted` and dependent work does not start.
-- `lanes`: `taskFile` (explicit path, or `{{taskFile}}`), `tier` (default 1), `access:"write"`.
+- `lanes`: optional `taskFile` (explicit path, or `{{taskFile}}`), `tier` (default 1), `access:"write"`.
+  Without a task file from the block or run options, the engine makes a highest-tier,
+  read-only plan call and saves its task-list text inside the run folder. This works with
+  `{"lanes":{}}`, without any planning step or installed built-in workflow.
+  Before each phase with workers below the highest tier, one engine brief call returns all
+  task briefs as `{"briefs":{"T001":"..."}}`. Each brief specifies changes, files, steps and
+  the check that proves the change. Workers receive their own briefs.
   Reads Markdown phases and task lines described below. Unticked tasks run by ascending
   phase. Consecutive `[P]` tasks form independent lanes, bounded by configured fanout;
   other tasks are sequential barriers. Lane branches survive interruption. Merge conflicts
   redo the lane once on the merged tree. A second conflict waits for the user, without a
   planning or resolution call. Every phase runs gates on its merged revision before ticking.
+  A failed phase gate attributes the failure to the phase's tasks: diagnosis rewrites each
+  task's brief and retries repair the merged tree before gates run again, within the same
+  per-task retry limit.
 
-A workflow budget counts every agent call, including failed starts and retries. Exhaustion
-stops execution before another call. `parallel` reserves distinct entries before dispatch.
+A workflow budget counts every agent call, including engine plans, briefs, diagnoses, syntheses, failed starts and retries. Exhaustion
+stops execution before another call. Engine prompts are in `orchestra/templates/`, outside
+all workflow packs. Strong calls are text-only, read-only and quota-balanced at the highest
+configured tier; they wait for its quota without falling to a lower tier. Workflow fields
+cannot disable them. `run.json` records each strong call's `purpose`. `parallel` reserves distinct entries before dispatch.
 If no eligible entry has quota at or above the requested tier, the step waits and reports
 why. Unknown quota stays unknown and keeps weight 1. Nothing falls back to a lower tier.
 
@@ -150,7 +172,10 @@ engine and original checkout for trusted gate scripts.
 
 Dry mode uses in-process mock outputs, automatic mock user answers and mock successful gates.
 It prints each block and parallel child, traverses every bounded loop iteration, and counts
-calls against the budget. Lanes use one synthetic task. It never invokes an adapter, command,
+calls against the budget, including syntheses and conservative brief estimates for write
+calls (real highest-tier workers skip separate briefs). Lanes use one synthetic phase and
+task, with a plan call when no taskFile field is supplied. Real task-file availability,
+phase counts, quota and retries can change the actual call count. It never invokes an adapter, command,
 quota reader or user question, and never writes files. This checks the bounded execution
 shape; real command exits and agent output contents still need an actual run.
 
@@ -171,7 +196,7 @@ identity metadata removed. Outputs must also omit self-identification in their p
 ## Council sessions
 
 `council`, `council-compare`, `council-learn` and `council-review` share framing, proposals,
-critique, verification, synthesis and decision prompts. Their research prompt selects the
+critique, verification and decision prompts, using the engine synthesis after each parallel block. Their research prompt selects the
 mode. Each requests 3 agents at tier 3 or above, from different vendors when available,
 otherwise any available agents. Research requests tier 1.
 All agent steps use read access. Proposals have independent sessions; critique receives
@@ -182,12 +207,12 @@ Agents declare local evidence as `evidence:[{file,line,endLine,quote}]`. The sta
 `scripts/verify-quotes` gate checks every declared exact quote against its claimed real file
 and line range. It also scans prose for file:line references and quotations; undeclared
 quotations and remote sources stay unverified. A verified location proves existence only,
-never the meaning of a claim. Checks run before synthesis and again before the user decides. Results are in
+never the meaning of a claim. Checks run after the engine syntheses and before the user decides. Results are in
 `verification.json` and the gate logs; mismatches
-are marked unverified for synthesis, rather than silently accepted or retried by a model.
+are marked unverified for the user, rather than silently accepted or retried by a model.
 
 The final user answer becomes the decision text in `decision.md` in the run folder. It has
 Date, Question, Decision, Rejected options, Open questions and Sources, including verification
-labels. Synthesis supplies proposed rejected options and open questions for user confirmation;
+labels. The final critique block’s `synthesis` supplies proposed rejected options and open questions for user confirmation;
 a JSON answer with `decision`, `rejectedOptions` and `openQuestions` replaces those tables. Council never edits project files. Copy the record
 to a destination you choose when you want to keep it.

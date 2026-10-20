@@ -42,7 +42,6 @@ export function validateWorkflow(w,dir) {
       if(k==='loop') {if(!Number.isSafeInteger(b.max)||b.max<1 || !b.until?.step || !b.until.field || !Object.hasOwn(b.until,'equals') || (b.until.equals!==null && typeof b.until.equals==='object'))throw new Error('loop needs max and structured until');walk(b.steps);if(!b.steps.some((s)=>s.id===b.until.step))throw new Error('loop until must reference a child step');}
       if(b.sees!==undefined && b.sees!=='previous' && (!Array.isArray(b.sees) || b.sees.some((s)=>typeof s!=='string')))throw new Error('sees must name earlier steps');
       if(k==='lanes' && b.access && b.access!=='write')throw new Error('lanes requires write access');
-      if(k==='lanes' && !b.taskFile)throw new Error('lanes requires taskFile');
       const allowed={agent:['prompt','tier','agent','access','sees','unless','outputFile'],parallel:['prompt','tier','agent','access','sees','count','distinct','anonymize'],ask:['prompt','questions'],gate:['command'],loop:['steps','max','until'],lanes:['taskFile','tier','access']}[k];
       if(Object.keys(b).some((p)=>!allowed.includes(p)))throw new Error(`unknown ${k} field`);
     }
@@ -76,8 +75,19 @@ export function dryWorkflow(w,emit=console.log) {
     emit(`${key}: ${k}${k==='gate'?` (mock exit 0; not executed) ${b.command}`:k==='ask'?' (mock user answer)':k==='lanes'?' (mock task list; no project writes)':''}`);
     if(k==='loop'){for(let i=0;i<b.max;i++)walk(b.steps,`${key}/${i}/`);outputs[s.id]={[b.until.field]:b.until.equals};}
     else if(['agent','parallel','lanes'].includes(k)){
-      const n=k==='parallel'?(b.count ?? 2):1;
-      for(let i=0;i<n;i++){if(++calls>w.budget.calls)throw new Error('agent call budget exhausted in dry run');emit(`  ${key}/${i}: mock agent; tier ${b.tier ?? 2}; ${b.access ?? 'read'}`);}
+      const call=(label,tier,access)=>{if(++calls>w.budget.calls)throw new Error('agent call budget exhausted in dry run');emit(`  ${key}/${label}: mock agent; tier ${tier}; ${access}`);};
+      if(k==='lanes') {
+        emit('  engine: plan if no task file; one brief call per phase below highest tier');
+        if(!b.taskFile)call('plan','highest','read');
+        call('phase-brief','highest','read');call('task',b.tier ?? 1,'write');
+      } else {
+        const n=k==='parallel'?(b.count ?? 2):1;
+        for(let i=0;i<n;i++) {
+          if(b.access==='write')call(`${i}-brief-if-below-top`,'highest','read');
+          call(i,b.tier ?? 2,b.access ?? 'read');
+        }
+        if(k==='parallel')call('synthesis','highest','read');
+      }
       outputs[s.id]={mock:true};
     }else outputs[s.id]={mock:true};
   }};

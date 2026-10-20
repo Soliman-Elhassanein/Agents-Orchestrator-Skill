@@ -48,7 +48,7 @@ class Runtime {
     return value.replace(/\{\{([^}]+)\}\}/g,(_m,p)=>{const v=lookup(p);return typeof v==='object'?JSON.stringify(v):v ?? '';});
   }
   prompt(b,role='agent',extra='') {
-    let text=b.prompt ? this.interpolate(readFileSync(join(this.workflow.dir,b.prompt),'utf8')) : extra;
+    let text=b.engineText ?? (b.prompt ? this.interpolate(readFileSync(join(this.workflow.dir,b.prompt),'utf8')) : extra);
     role=/^ORCHESTRA ROLE: ([^\n]+)/.exec(text)?.[1] ?? role;
     text=text.replace(/^ORCHESTRA ROLE: [^\n]+\nCYCLE: [^\n]+\n?/, '');
     const rules=readFileSync(join(engineDir,'templates/agent.md'),'utf8');
@@ -85,7 +85,7 @@ class Runtime {
       this.check();
       const factors=this.cfg.quotaBalancing?.enabled===false ? {} : balanceFactors(loadQuota(this.root),balanceOptions(this.cfg));
       const omitted=typeof excluded==='function'?excluded():excluded;
-      const fits=(a)=>!this.s.unavailable[a.name] && (!b.agent || a.name===b.agent) && a.tier>=(b.tier ?? (b.agent?1:2));
+      const fits=(a)=>!this.s.unavailable[a.name] && (!b.agent || a.name===b.agent) && a.tier>=(b.purpose?this.topTier():b.tier ?? (b.agent?1:2));
       // Distinct vendors are preferred, not required: with too few vendors, any available agent serves.
       let eligible=this.agents.filter((a)=>fits(a) && !omitted.has(a.cli));
       if(!eligible.length && omitted.size)eligible=this.agents.filter(fits);
@@ -105,12 +105,44 @@ class Runtime {
     g.git(wt,['restore','--source',base,'--staged','--worktree','--','.orchestra'],{allowFail:true});
     g.git(wt,['clean','-fdqx','--','.orchestra']);
   }
+  topTier() {return Math.max(...this.agents.map((a)=>a.tier));}
+  async strong(purpose,key,wt,input) {
+    const e=await this.isolated({access:'read',tier:this.topTier(),purpose,role:purpose,
+      engineText:readFileSync(join(engineDir,`templates/${purpose}.md`),'utf8')+'\n\n'+input},key,g.headSha(wt));
+    return e.output;
+  }
+  text(output) {return typeof output?.text==='string'?output.text:JSON.stringify(output);}
+  recordWrite(wt,base,e,call,outDir) {
+    const changes=g.changedFiles(wt,base),commits=g.git(wt,['rev-list',`${base}..HEAD`]).out.split('\n').filter(Boolean);
+    const patch=join(outDir,'changes.patch');writeFileSync(patch,g.git(wt,['diff','--binary',base,'HEAD']).out);
+    Object.assign(call,{changes,commits,diff:relative(this.run.dir,patch)});
+    e.changes=[...new Set([...(e.changes ?? []),...changes])];
+    e.commits=[...new Set([...(e.commits ?? []),...commits])];
+    e.diff=call.diff;e.diffs=[...(e.diffs ?? []),call.diff];
+  }
+  async retryFailure(b,key,wt,e,summary,status='failed') {
+    e.failures++;e.tierFailures++;e.status=status;e.pendingFailure=summary;this.save();
+    await this.prepareRetry(b,key,wt,e);
+  }
+  async prepareRetry(b,key,wt,e) {
+    const summary=e.pendingFailure;
+    if(e.failures>(this.cfg.executorRetries ?? 1))throw new Error(`${key}: ${summary}`);
+    // A diagnosed retry on the original tier precedes escalation, even at threshold 1.
+    if(b.access==='write') {
+      e.brief=this.text(await this.strong('diagnosis',`${key}/diagnosis-${e.failures}`,wt,
+        `Task and current brief:\n${e.brief ?? this.prompt(b,b.role, e.extra ?? '')}\nPrevious attempt failed:\n${summary}`));
+    } else e.digest=`\nPrevious attempt failed:\n${summary}`;
+    if(e.tierFailures>=Math.max(b.access==='write'?2:1,this.cfg.escalate?.afterFailures ?? 1)) {e.tier=this.agents.map((a)=>a.tier).filter((tier)=>tier>e.tier).sort((a,b)=>a-b)[0] ?? e.tier;e.tierFailures=0;e.escalated=true;}
+    delete e.pendingFailure;this.save();
+  }
   async job(b,key,wt,extra='',fixed,reservations) {
     const e=this.s.steps[key] ??= {status:'running'}; e.attempts ??=[];e.failures ??=0;
     if(e.status==='completed')return e;
     e.startBase ??= g.headSha(wt);
     e.tier ??= b.tier ?? (b.agent ? this.agents.find((a)=>a.name===b.agent)?.tier ?? 2 : 2);e.tierFailures ??=0;
-    let digest='', named=b.agent;
+    if(extra)e.extra=extra;extra=e.extra ?? extra;
+    if(e.pendingFailure)await this.prepareRetry(b,key,wt,e);
+    let named=e.escalated?undefined:b.agent;
     for(;;) {
       this.check();this.steering();
       if(this.s.usage.calls>=this.workflow.budget.calls)throw new Error('agent call budget exhausted');
@@ -118,13 +150,17 @@ class Runtime {
       const omitted=()=>new Set(reservations ? [...reservations].filter(([k])=>k!==key).map(([,v])=>v) : []);
       const agent=fixed ?? await this.choose({...b,agent:named,tier:requested},omitted,(a)=>reservations?.set(key,a.cli));fixed=null;
       if(agent.tier>e.tier)e.tierFailures=0;e.tier=agent.tier;
+      if(b.access==='write' && agent.tier<this.topTier() && !e.brief) {
+        e.brief=b.phaseBrief ?? this.text(await this.strong('brief',`${key}/brief`,wt,this.prompt(b,b.role,extra)));this.save();
+      }
+      if(this.s.usage.calls>=this.workflow.budget.calls)throw new Error('agent call budget exhausted');
       const base=g.headSha(wt);e.base=base;e.status='running';this.s.phase='executing';this.save();
       this.s.usage.calls++;this.s.usage.unreported++;
-      const call={agent:describeAgent(agent),entry:agent.name,step:key,status:'running',exit:null,tokens:null};
+      const call={agent:describeAgent(agent),entry:agent.name,step:key,...(b.purpose?{purpose:b.purpose}:{}),status:'running',exit:null,tokens:null};
       this.s.calls.push(call);e.attempts.push(call);e.agent=agent.name;e.cli=agent.cli;this.save();
       const res=await runAgent(agent,{root:this.root,cwd:wt,outDir:this.run.path('calls',key.replace(/[^\w-]/g,'-')),readOnly:b.access!=='write',
         context:{handoff:JSON.stringify({run:this.s.id,step:key,base,finished:Object.keys(this.s.steps).filter((k)=>this.s.steps[k].status==='completed')}).slice(0,8000)},
-        timeout:parseDuration(this.cfg.agentTimeout) ?? 1200000,brief:this.prompt({...b,cli:agent.cli},b.role ?? 'agent',extra+digest)});
+        timeout:parseDuration(this.cfg.agentTimeout) ?? 1200000,brief:this.prompt({...b,cli:agent.cli,prompt:e.brief?undefined:b.prompt,engineText:e.brief ?? b.engineText},b.role ?? 'agent',extra+(e.digest ?? ''))});
       const tokens=res.usage?.tokens;
       if(tokens){this.s.usage.unreported--;this.s.usage.tokens+=Object.values(tokens).filter(Number.isFinite).reduce((a,b)=>a+b,0);}
       Object.assign(call,{status:res.status,exit:res.exitCode ?? null,log:relative(this.run.dir,res.outDir),tokens:tokens ?? null});
@@ -142,26 +178,21 @@ class Runtime {
       }
       if(b.access!=='write' && dirty) {res.status='failed';res.error='read-only call changed files';}
       if(res.status==='completed' && output.questions?.length) {
-        if(b.access==='write')g.commitAll(wt,`orchestra: ${key} before user question`);
+        if(b.access==='write') {g.commitAll(wt,`orchestra: ${key} before user question`);this.recordWrite(wt,base,e,call,res.outDir);}
         await this.ask(key,output.questions);continue;
       }
       if(res.status==='completed') {
         if(b.access==='write') {
-          g.commitAll(wt,`orchestra: ${key}`);const files=g.changedFiles(wt,e.startBase);
-          e.changes=files;e.commits=g.git(wt,['rev-list',`${e.startBase}..HEAD`]).out.split('\n').filter(Boolean);
-          const patch=this.run.path('calls',`${key.replace(/[^\w-]/g,'-')}-changes.patch`);mkdirSync(join(this.run.dir,'calls'),{recursive:true});
-          writeFileSync(patch,g.git(wt,['diff','--binary',e.startBase,'HEAD']).out);e.diff=relative(this.run.dir,patch);
-          if(!files.length) {e.status='no-changes';call.status='no-changes';this.save();throw new Error(`${key}: write call made no changes`);}
+          g.commitAll(wt,`orchestra: ${key}`);
+          if(!g.changedFiles(wt,e.validationBase ?? e.startBase).length) {res.status='no-changes';res.error='write call made no changes';}
+          else this.recordWrite(wt,base,e,call,res.outDir);
         }
-        e.status='completed';e.output=output;e.commit=g.headSha(wt);call.status='completed';this.save();return e;
+        if(res.status==='completed') {e.status='completed';if(e.output && typeof e.output==='object' && typeof output==='object') {for(const field of Object.keys(e.output))delete e.output[field];Object.assign(e.output,output);}else e.output=output;e.commit=g.headSha(wt);call.status='completed';this.save();return e;}
       }
       g.git(wt,['add','-A']);writeFileSync(join(res.outDir,'unfinished.patch'),g.git(wt,['diff','--cached','--binary',base]).out);
       g.git(wt,['reset','--hard',base]);g.git(wt,['clean','-fdq']);
-      e.failures++;e.tierFailures++;
-      if(e.tierFailures >= (this.cfg.escalate?.afterFailures ?? 1)){e.tier=agent.tier+1;e.tierFailures=0;named=undefined;}
-      e.status='failed';call.status='failed';this.save();
-      if(e.failures>(this.cfg.executorRetries ?? 1))throw new Error(`${key}: ${res.error ?? 'agent failed'}`);
-      digest=`\nPrevious attempt at this step failed:\n${attemptSummary(res.outDir,res)}\nStart again from the last good commit.`;
+      call.status=res.status;await this.retryFailure(b,key,wt,e,attemptSummary(res.outDir,res),res.status);
+      if(e.escalated)named=undefined;
     }
   }
   async gate(command,key,phase) {
@@ -179,6 +210,25 @@ class Runtime {
     }); } finally {closeSync(fd);this.gateChild=null;g.removeWorktree(this.root,wt);}
     Object.assign(record,{exit,status:'finished'});this.save();this.check();
     if(exit!==0)throw new Error(`gate exited ${exit}: ${command}`);return record;
+  }
+  gateDigest(error) {
+    const gate=this.s.gates.at(-1);
+    return `${error.message}\nRevision: ${gate?.revision}\n${gate?readFileSync(this.run.path(gate.log),'utf8').slice(-6000):''}`;
+  }
+  async checkedGates(runGates,writers) {
+    for(;;) {
+      for(const {b,key} of writers ?? [])if(this.s.steps[key].pendingFailure)await this.job(b,key,this.wt);
+      try {return await runGates();}catch(error) {
+        this.check();if(!writers?.length)throw error;
+        const summary=this.gateDigest(error);
+        for(const {b,key} of writers) {
+          const e=this.s.steps[key];
+          e.validationBase=g.headSha(this.wt);
+          await this.retryFailure(b,key,this.wt,e,summary);
+          await this.job(b,key,this.wt);
+        }
+      }
+    }
   }
   async gates(key,phase) {for(const [i,cmd] of this.gateCommands.entries())await this.gate(cmd,`${key}-${i}`,phase);}
   async isolated(b,key,base,extra='',branch) {
@@ -212,12 +262,20 @@ class Runtime {
     for(const r of results) {
       const e=r.value;output.push(e.output);
       if(b.access==='write') {const m=g.merge(this.wt,e.commit,`orchestra: merge ${key}`);if(!m.ok){g.abortMerge(this.wt);throw new Error('parallel writes conflict');}}
-    }parent.peers=results.map((r)=>r.value.cli);return {items:output};
+    }parent.peers=results.map((r)=>r.value.cli);
+    const synthesis=await this.strong('synthesis',`${key}/synthesis`,this.wt,
+      this.prompt(b,'synthesis')+'\nIndependent outputs:\n'+JSON.stringify(output));
+    return {items:output,synthesis};
   }
   async lanes(b,key) {
     const entry=this.s.steps[key] ??= {status:'running'};entry.lanes ??={};entry.phases ??=[];
     if(!entry.text) {
-      const input=this.interpolate(b.taskFile);if(!input)throw new Error('taskFile input missing');
+      let input=this.interpolate(b.taskFile) || this.s.options?.taskFile;
+      if(!input) {
+        const output=await this.strong('plan',`${key}/plan`,this.wt,this.s.task);
+        const text=output.taskList ?? output.text;parseTasks(text ?? '');
+        input=this.run.path('tasks.md');writeFileSync(input,text);
+      }
       const path=resolve(this.root,input);entry.text=readFileSync(path,'utf8');entry.path=path;
       const rel=relative(this.root,path);entry.tickPath=path.startsWith(this.run.dir+'/') ? path : !rel.startsWith('..') && !isAbsolute(rel) ? join(this.wt,rel) : null;this.s.taskFile=path;
       if(!entry.tickPath)throw new Error('task file must be in the project or run folder');
@@ -233,6 +291,13 @@ class Runtime {
       for(const task of todo) {
         if(task.parallel && groups.at(-1)?.every((t)=>t.parallel))groups.at(-1).push(task);else groups.push([task]);
       }
+      entry.briefs ??={};
+      if(!entry.briefs[phase] && (await this.choose({...b,tier:b.tier ?? 1})).tier<this.topTier()) {
+        const output=await this.strong('brief',`${key}/phase-${phase}/brief`,this.wt,
+          `Return {"briefs":{"TASK_ID":"brief text"}} for every task in this phase.\n${JSON.stringify(todo)}\nRequest: ${this.s.task}`);
+        if(!todo.every((t)=>typeof output.briefs?.[t.id]==='string' && output.briefs[t.id].trim()))throw new Error('phase briefs missing task IDs or text');
+        entry.briefs[phase]=output.briefs;this.save();
+      }
       for(const group of groups) {
         for(let offset=0;offset<group.length;offset+=this.cfg.fanout.executors) {
           const batch=group.slice(offset,offset+this.cfg.fanout.executors), base=g.headSha(this.wt);
@@ -243,9 +308,9 @@ class Runtime {
               if(!lane.redo){lane.redo=true;lane.base=g.headSha(this.wt);g.deleteBranch(this.root,lane.branch);this.save();}
             }
             const taskKey=`${key}/${t.id}${lane.redo?'/redo':''}`;
-            const e=await this.isolated({...b,role:'executor',access:'write'},taskKey,lane.base,`\nSUBTASK:\n${t.id} ${t.text}\n\n${lane.redo?'Redo your work on top of the merged result; preserve the changes already there.':''}`,lane.branch);
+            const e=await this.isolated({...b,tier:b.tier ?? 1,phaseBrief:entry.briefs[phase]?.[t.id],role:'executor',access:'write'},taskKey,lane.base,`\nSUBTASK:\n${t.id} ${t.text}\n\n${lane.redo?'Redo your work on top of the merged result; preserve the changes already there.':''}`,lane.branch);
             let record=this.s.tasks.find((r)=>r.id===t.id);if(!record){record={id:t.id,phase,status:'skipped',commits:[]};this.s.tasks.push(record);}
-            Object.assign(record,{status:'skipped',agent:e.agent,commits:e.commits,attempts:Object.entries(this.s.steps).filter(([k])=>k===`${key}/${t.id}` || k.startsWith(`${key}/${t.id}/`)).reduce((n,[,e])=>n+(e.attempts?.length ?? 0),0)});this.save();
+            Object.assign(record,{status:'skipped',agent:e.agent,commits:e.commits,attempts:Object.entries(this.s.steps).filter(([k])=>k===`${key}/${t.id}` || k.startsWith(`${key}/${t.id}/`)).reduce((n,[,e])=>n+(e.attempts?.filter((c)=>!c.purpose).length ?? 0),0)});this.save();
           };
           const results=await Promise.allSettled(batch.map((t)=>runTask(t)));
           const failed=results.find((r)=>r.status==='rejected');if(failed){
@@ -268,7 +333,25 @@ class Runtime {
           }
         }
       }
-      await this.gates(`${key}-phase${phase}`,phase);this.s.phaseGateRevision=g.headSha(this.wt);
+      for(;;) {
+        for(const t of todo) {
+          const lane=entry.lanes[t.id], taskKey=`${key}/${t.id}${lane.redo?'/redo':''}`;
+          if(this.s.steps[taskKey].pendingFailure)await this.job({...b,role:'executor',access:'write'},taskKey,this.wt);
+        }
+        try {await this.gates(`${key}-phase${phase}`,phase);break;}
+        catch(error) {
+          this.check();
+          for(const t of todo) {
+            const lane=entry.lanes[t.id], taskKey=`${key}/${t.id}${lane.redo?'/redo':''}`, e=this.s.steps[taskKey];
+            const worker={...b,role:'executor',access:'write'};
+            e.validationBase=g.headSha(this.wt);
+            await this.retryFailure(worker,taskKey,this.wt,e,this.gateDigest(error));
+            const repaired=await this.job(worker,taskKey,this.wt,`\nSUBTASK:\n${t.id} ${t.text}`);
+            Object.assign(this.s.tasks.find((r)=>r.id===t.id),{agent:repaired.agent,commits:repaired.commits,attempts:repaired.attempts.length});
+          }
+        }
+      }
+      this.s.phaseGateRevision=g.headSha(this.wt);
       const lines=entry.text.split('\n');for(const t of todo){lines[t.lineIndex]=lines[t.lineIndex].replace('- [ ]','- [x]');this.s.tasks.find((r)=>r.id===t.id).status='executed';}
       entry.text=lines.join('\n');mkdirSync(resolve(entry.tickPath,'..'),{recursive:true});writeFileSync(entry.tickPath,entry.text);
       if(entry.tickPath.startsWith(this.wt+'/'))g.commitAll(this.wt,`orchestra: tick phase ${phase}`);
@@ -283,10 +366,20 @@ class Runtime {
     const value=get(output,b.outputFile.field);if(typeof value!=='string')throw new Error('outputFile field must contain text');
     mkdirSync(resolve(file,'..'),{recursive:true});if(!existsSync(file))writeFileSync(file,value);output.taskFile=file;
   }
+  trackWriters(kind,b,key,e) {
+    if(kind==='agent' && b.access==='write' && !e.output?.skipped)this.lastWriters=[{b,key}];
+    else if(kind==='parallel' && b.access==='write')this.lastWriters=Array.from({length:b.count ?? 2},(_,i)=>({b,key:`${key}/${i}`}));
+    else if(kind==='loop') {e.writers ??=this.lastWriters;this.lastWriters=e.writers;}
+    else if(kind!=='gate')this.lastWriters=null;
+  }
   async sequence(steps,prefix='') {
     for(const step of steps) {
       this.check();this.steering();const key=prefix+step.id,k=blocks.find((k)=>step[k]),b=step[k];
-      let e=this.s.steps[key];if(e?.status==='completed'){if(k==='agent')this.materialize(b,e.output);this.outputs[step.id]=e.output;this.origins[step.id]=e.peers;this.previous=step.id;continue;}
+      let e=this.s.steps[key];
+      if(e?.status==='completed') {
+        this.trackWriters(k,b,key,e);if(k==='agent')this.materialize(b,e.output);
+        this.outputs[step.id]=e.output;this.origins[step.id]=e.peers;this.previous=step.id;continue;
+      }
       if(k==='agent' && b.unless && this.interpolate(b.unless)) {this.s.steps[key]={status:'completed',output:{skipped:true,taskFile:this.interpolate(b.unless)}};this.outputs[step.id]=this.s.steps[key].output;this.previous=step.id;this.save();continue;}
       if(!e)e=this.s.steps[key]={status:'running'};
       let output;
@@ -295,7 +388,7 @@ class Runtime {
         this.materialize(b,output);
       } else if(k==='parallel')output=await this.parallel(b,key);
       else if(k==='ask')output=await this.ask(key,b.questions?.map((q)=>this.interpolate(q)) ?? [this.interpolate(readFileSync(join(this.workflow.dir,b.prompt),'utf8'))]);
-      else if(k==='gate')output=await this.gate(this.interpolate(b.command),key);
+      else if(k==='gate')output=await this.checkedGates(()=>this.gate(this.interpolate(b.command),key),this.lastWriters);
       else if(k==='lanes')output=await this.lanes(b,key);
       else if(k==='loop') {
         let matched=false;
@@ -308,6 +401,7 @@ class Runtime {
         }
         if(!matched){e.status='exhausted';this.save();throw new Error(`loop ${key} reached max`);}
       }
+      this.trackWriters(k,b,key,e);
       e.status='completed';e.output=output;this.outputs[step.id]=output;this.origins[step.id]=e.peers;this.previous=step.id;this.save();
     }
   }
@@ -329,7 +423,7 @@ class Runtime {
       await refreshQuota(this.root,this.agents);
       await this.sequence(this.workflow.steps);
       if(!this.s.finalGatesPassed) {
-        if(this.s.phaseGateRevision!==g.headSha(this.wt))await this.gates('final');
+        if(this.s.phaseGateRevision!==g.headSha(this.wt))await this.checkedGates(()=>this.gates('final'),this.lastWriters);
         this.s.finalGatesPassed=true;
       }
       this.s.status='completed';

@@ -4,7 +4,7 @@
 
 Orchestra is a Node CLI that coordinates your agent CLIs for code, research, review and
 deliberation. Strong models plan and synthesize. Cheap models do the bulk of the work.
-This is version **2.0.1**, with no npm dependencies.
+This is version **2.1.0**, with no npm dependencies.
 
 The five promises in [CONSTITUTION.md](CONSTITUTION.md):
 
@@ -16,6 +16,9 @@ The five promises in [CONSTITUTION.md](CONSTITUTION.md):
 - **Nothing spends tokens while waiting.** The tool is idle until something needs you.
 - **Any CLI, and you stay the only author.** Orchestra is vendor independent and commits
   as your Git identity, with no AI attribution.
+
+The engine enforces promise 1 in its blocks: planning, briefs, failure diagnosis and
+synthesis keep working when workflows are replaced or removed.
 
 Orchestra is not a judge: it reports facts about calls, commits, gate exits and logs; you decide quality.
 
@@ -171,7 +174,8 @@ run above includes the earlier task's changes. Inspect both before keeping them.
 
 ### 5. Try a council session
 
-Council research requests tier 1; proposals and synthesis request tier 3.
+Council research requests tier 1 and proposals request tier 3; engine syntheses use the
+highest configured tier.
 Configure those tiers. Three vendor CLIs are preferred, but are not required.
 
 ```sh
@@ -181,8 +185,9 @@ orchestra answer "Compare local files and a local database; portability matters 
 orchestra watch
 ```
 
-Council researches, gathers independent proposals, passes anonymous peers to critique,
-checks local quotes and file references, then synthesizes a recommendation.
+Council researches, gathers independent proposals and passes anonymous peers to critique.
+The engine synthesizes each parallel block; a gate checks local quotes and file references
+before you decide.
 If watching returns a check-in or another event, handle it and reattach with `orchestra watch`.
 When it reports the final decision question, read the synthesis in `orchestra status --json`
 and `.orchestra/runs/<run-id>/verification.json`. Then give your decision:
@@ -218,8 +223,11 @@ adapter. `init` only detects tools; it does not install or authenticate them. It
 model names may need changing for your account. No detected tools produces an empty agents
 map, which you must configure before work can start.
 
-Startup errors exclude that entry and report an exact fix; ordinary failures retry with a bounded digest and escalate. A write call that changes
-nothing is `no-changes`, blocks dependent work and cannot complete a run.
+Startup errors exclude that entry and report an exact fix. Write failures get a highest-tier
+diagnosis and revised brief before retrying on the original tier. Escalation follows
+`escalate.afterFailures`, with at least one diagnosed retry on the original tier before moving up.
+A write call that changes nothing is `no-changes`; it gets the same diagnosis and bounded retries, and cannot
+complete or unblock dependent work without a real change.
 
 `fanout.executors` bounds lane concurrency. `executorRetries` limits retries;
 `agentTimeout` and `gateTimeout` limit how long calls and gates may run. `gates` contains shell
@@ -252,8 +260,9 @@ Use `--access read` for an answer or research without file edits. Direct tasks u
 queue, quota, questions, resume and records as workflows.
 `orchestra run <workflow> "task"` selects a workflow.
 
-The `code` workflow reads an explicit task file or asks a tier-3 agent to write one.
-Cheap agents then run lanes, merge and run phase gates. Only executed tasks whose gates
+The `code` workflow is a single `lanes` block. The engine reads an explicit task file or
+asks a highest-tier agent to write one. It prepares briefs for cheap workers, then runs
+lanes, merges and runs phase gates. Only executed tasks whose gates
 passed are ticked. Generated lists stay in the run folder. Project task files are ticked
 on the run branch and reach your checkout when landed.
 
@@ -273,6 +282,23 @@ Workflows are versioned JSON with six blocks: `agent`, `parallel`, `ask`, `gate`
 `lanes`. Project workflows override user workflows, which override built-ins. Each workflow
 has a finite call budget. Resume skips completed steps and continues retained lane branches.
 A lane merge conflict causes one redo on the merged work; a second conflict asks you.
+
+The engine's strong calls are read-only and text-only, selected with the same quota balancing
+as workers at the highest configured tier. If that tier has no quota, the run waits.
+Their prompts ship with the engine and workflows cannot disable them. Budget for:
+
+- A cheap single write (including a bare `run`): one brief plus one worker call. A worker
+  already on the highest tier needs no separate brief. Read calls need no brief.
+- Lanes: one plan if no task file, one brief call per phase containing all that phase's
+  task briefs when workers are below the highest tier, plus the task calls.
+- Parallel: its child calls plus one synthesis. Write children also receive briefs when needed.
+- Each failed write being retried: one diagnosis plus the retry. Attributable gate failures
+  also use diagnosis; phase gates repair the phase's tasks on the merged tree. Startup
+  failures do not trigger diagnosis. Retries and failed starts count against the call budget.
+
+A typical council session makes nine calls (one research, three proposals, three critiques
+and two engine syntheses); a second critique round adds four. These counts exclude retries.
+Strong calls appear in `run.json` with `purpose`: `plan`, `brief`, `diagnosis` or `synthesis`.
 
 See [workflow format](docs/workflows.md), [adapter format](docs/adapters.md) and
 [records](docs/records.md) for the public interfaces.

@@ -1,5 +1,18 @@
 # Changelog
 
+## 2.1.0 — 2026-10-20
+
+- Enforce constitution 1.1.0 promise 1 in the engine: highest-tier, read-only plans,
+  briefs, failure diagnosis and parallel syntheses survive workflow replacement or removal.
+- Let lanes generate task lists and batch all task briefs once per phase; brief single cheap
+  writes, including bare runs, before execution. Highest-tier workers skip separate briefs.
+- Diagnose failed writes and attributable gates before bounded retries on the original tier;
+  keep escalation as the last resort and exclude startup failures from task failures.
+- Preserve raw parallel items alongside synthesis, and record each strong call’s purpose.
+- Reduce code to lanes and use engine synthesis in council modes, retaining user decisions
+  and records. Regenerate diagrams and include engine calls in dry-run budget estimates.
+- Add public constitution invariants and direct-block mock tests without built-in workflows.
+
 ## 2.0.1 — 2026-10-20
 
 - Documentation: README rewritten for new users; council vendor fallback documented; upgrade note moved to the changelog.

@@ -9,9 +9,10 @@ function label(step) {
   const kind=kindOf(step), b=step[kind], lines=[`${step.id} · ${kind}`];
   if(kind==='agent' || kind==='parallel')lines.push(selection(b));
   if(kind==='parallel')lines.push(`count: ${b.count ?? 2}${b.distinct ? ' · distinct: vendor' : ''}`,`anonymised: ${b.anonymize ? 'yes' : 'no'}`,`sees: ${Array.isArray(b.sees) ? b.sees.join(', ') || 'none' : b.sees ?? 'none'}`);
+  if(kind==='agent' && b.access==='write')lines.push('engine brief below highest tier; diagnosis before retry');
   if(kind==='ask')lines.push('you answer');
   if(kind==='gate')lines.push(b.command);
-  if(kind==='lanes')lines.push('phases in order, [P] tasks in parallel worktrees, merge, gates');
+  if(kind==='lanes')lines.push('engine plan if no task file; one brief call per phase below highest tier','phases in order, [P] tasks in parallel worktrees, merge, gates','engine diagnosis before task retries');
   if(kind==='loop')lines.push(`max: ${b.max}`);
   return lines.join('\n');
 }
@@ -49,7 +50,7 @@ export function workflowDiagram(workflow) {
     }
     if(kind==='parallel') {
       const fork=node(`${label(step)}\nfork`,kind,x+w/2-210,y,420,120,parent,'shape=hexagon;','step');
-      const joinNode=node('join',kind,x+w/2-40,y+h-30,80,30,parent,'rhombus;','join');
+      const joinNode=node('join + highest-tier synthesis',kind,x+w/2-140,y+h-30,280,30,parent,'rhombus;','join');
       for(let i=0;i<(b.count ?? 2);i++){
         const child=node(`${step.id} / ${i+1} · parallel\n${selection(b)}`,kind,x+i*250+10,y+165,230,90,parent,'','child');
         edge(fork,child,'','',parent);edge(child,joinNode,'','',parent);

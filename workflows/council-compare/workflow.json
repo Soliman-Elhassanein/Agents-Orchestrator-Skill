@@ -66,25 +66,6 @@
       }
     },
     {
-      "id": "synthesize",
-      "agent": {
-        "prompt": "../_shared/synthesize.md",
-        "tier": 3,
-        "access": "read",
-        "sees": [
-          "research",
-          "proposals",
-          "rounds"
-        ]
-      }
-    },
-    {
-      "id": "verify-summary",
-      "gate": {
-        "command": "node \"{{workflowDir}}/../_shared/scripts/verify-quotes\" \"{{runDir}}\""
-      }
-    },
-    {
       "id": "decide",
       "ask": {
         "prompt": "../_shared/decide.md"

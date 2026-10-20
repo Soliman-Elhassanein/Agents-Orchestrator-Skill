@@ -29,13 +29,13 @@ quota, crash and stuck markers use the same keys as a later `watch`, preventing 
 | `state.json` | Worker creates; runner updates | internal checkpoint, workflow snapshot, per-step outputs, lane branch/base/merge checkpoints, phase progress and question batch |
 | `progress.md` | Runner | human view of state, questions, startup fixes and directions |
 | `task.md` | Worker | original request |
-| `tasks.md` | Workflow output | generated task list, checkboxes only change after merge and gates |
+| `tasks.md` | Engine plan | generated task list, checkboxes only change after merge and gates |
 | `FINAL.md` | Runner | process outcome and final revision |
 | `calls/<step>[-N]/brief.md` | Runner | fresh prompt with bounded handoff, selected inputs, user answers and steering |
 | `calls/<step>[-N]/stdout.txt`, `stderr.txt` | Adapter process | raw output, including partial output from interrupted calls |
 | `calls/<step>[-N]/result.json` | Adapter runner | adapterResult:1, status, message/output, tokens or null, exitCode, startup problem/fix, optional quota/transcript |
 | `calls/<step>[-N]/unfinished.patch` | Runner | failed task changes, reference only; never applied |
-| `calls/<step>-changes.patch` | Runner | diff of a successful write step, including agent-created commits |
+| `calls/<step>[-N]/changes.patch` | Runner | diff of that successful write call, including agent-created commits |
 | `logs/*.log` | Gate process | complete stdout/stderr of a command |
 | `events.jsonl` | Runner | startup handover events |
 | `answers-N.md` | `answer` | user's numbered answers; the runner alone updates state |
@@ -45,7 +45,11 @@ Gate records contain `phase`, `command`, `exit`, relative `log` and tested `revi
 Task records contain `id`, `phase`, `status` (`executed`, `failed`, `skipped`), agent,
 commits and attempt count. `executed` is set only after merge and phase gates.
 Step records include status, attempts, token totals, structured output, actual changed files, diff path
-and commits for writes. A successful empty write has status `no-changes` and stops dependents.
+and commits for writes. Write calls record their own changed files, commits and diff;
+step `changes` and `commits` accumulate those facts without attributing other lanes’ merges
+to the worker. `diff` points to the latest write patch and `diffs` retains all write patches.
+An empty write attempt has status `no-changes`; diagnosis and bounded retries precede
+stopping dependents if no real change results.
 A clean process exit alone never makes a write step completed.
 
 `tokens` is `{calls,tokens,unreported}`. Tokens sum reported input, output and cache fields;
@@ -91,8 +95,25 @@ No authoring call has write access to project files or engine source.
 
 Council sessions add `verification.json` (checks, verified/unverified counts, exact source,
 line range and reason) and `decision.md` (decision-record/1 Markdown sections). The gate
-checks all declared evidence and scanned references before synthesis and again before the
+checks all declared evidence and scanned references, including engine syntheses, before the
 user decides. The user's answer is the decision text; optional JSON can replace suggested
 rejected-options and open-questions tables. These files stay in the session folder until
 the user chooses a permanent destination. Parallel checkpoints keep peer vendor origins
 internally, separate from anonymous peer inputs; they allow peer exclusion after resume.
+
+## Engine strong calls
+
+`calls[].purpose` is `plan`, `brief`, `diagnosis` or `synthesis` for engine strong calls;
+ordinary worker calls omit it. These calls use read access at the highest configured tier
+and count toward the same call budget and usage totals, including failed starts and retries.
+Their step checkpoints and artifacts use child keys such as `execute/plan`,
+`execute/phase-1/brief`, `task/brief`, `task/diagnosis-1` and `views/synthesis`.
+Lane phase briefs and revised task briefs are retained in internal step checkpoints for
+resume. Generated task lists stay in the run folder. Parallel block output retains `items`
+and adds `synthesis`; neither replaces the raw child outputs.
+
+A failed gate retains its command, exit, revision and log even when a later repair passes.
+Diagnosis receives a bounded failure digest including gate output where applicable. Phase
+gate recovery conservatively attributes failure to every task in that phase and repairs on
+the merged revision; task ticks still require passing gates. Startup failures do not consume
+task-failure counts or cause diagnosis.
