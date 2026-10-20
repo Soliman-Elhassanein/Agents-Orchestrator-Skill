@@ -33,8 +33,7 @@ and respect its non-goals. Orchestra is a Node CLI, Node 18+, built-in modules o
 - Nothing spends tokens while waiting. Quota readers are read-only.
 - Runtime files are ignored by Git. Shared project files use the project lock; user stores use the user-directory lock. Document record changes
   in `docs/records.md`.
-- Branch per change, semantic versions and `CHANGELOG.md`. Run `npm test` and the guard
-  before committing. During restructuring, only pre-existing guard failures reduced by the
-  change may remain.
+- Branch per change, semantic versions and `CHANGELOG.md`. Run `npm test`
+  before committing; it is the delivery gate.
 - No AI attribution anywhere. Commits use the configured user's identity. Never push unless
   explicitly instructed.

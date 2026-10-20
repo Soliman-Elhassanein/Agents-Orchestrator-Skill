@@ -1,6 +1,6 @@
 {
   "name": "orchestra",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Orchestrate agent CLIs through workflows: parallel work across vendors, cheap models for the bulk, quota balancing.",
   "type": "module",
   "bin": {

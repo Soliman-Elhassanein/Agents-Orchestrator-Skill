@@ -172,7 +172,8 @@ identity metadata removed. Outputs must also omit self-identification in their p
 
 `council`, `council-compare`, `council-learn` and `council-review` share framing, proposals,
 critique, verification, synthesis and decision prompts. Their research prompt selects the
-mode. Each needs three available vendor CLIs at tier 3 or above; research requests tier 1.
+mode. Each requests 3 agents at tier 3 or above, from different vendors when available,
+otherwise any available agents. Research requests tier 1.
 All agent steps use read access. Proposals have independent sessions; critique receives
 anonymous peers and stops on the first response's structured `stop:true`, with at most two
 rounds. If the bound is reached without that field, dependent steps stop.

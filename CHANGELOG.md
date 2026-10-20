@@ -1,8 +1,15 @@
 # Changelog
 
+## 2.0.1 — 2026-10-20
+
+- Documentation: README rewritten for new users; council vendor fallback documented; upgrade note moved to the changelog.
+
 ## 2.0.0 — 2026-10-20
 
 First public release of Orchestra as a workflow runner.
+
+**Upgrade note:** Old role/tier configs must be replaced. `orchestra init --force` writes
+the new `orchestra.v2-adapters/1` schema. Edit its suggested agents and tiers for your accounts.
 
 - Generate deterministic draw.io workflow diagrams, check freshness, and create missing diagrams on pack installation.
 - Ship diagrams for every built-in workflow and generate drafts before new-workflow approval and saving.

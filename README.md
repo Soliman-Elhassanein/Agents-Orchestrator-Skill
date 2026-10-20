@@ -1,61 +1,204 @@
 # Orchestra
 
-**Get the most out of the subscriptions you already pay for.** Orchestra orchestrates agent
-CLIs for code, research, review and deliberation. Strong models write briefs and syntheses;
-cheap models do the bulk of the work. Quota balancing spreads work across your subscriptions.
-Parallel calls use separate sessions and worktrees. Waiting for your answers spends no tokens.
+**Get the most out of the subscriptions you already pay for.**
 
-Orchestra reports what ran, commits, gate exits and logs. You decide quality and what to keep.
-It works with any CLI through an adapter, commits as your Git identity and never pushes.
+Orchestra is a Node CLI that coordinates your agent CLIs for code, research, review and
+deliberation. Strong models plan and synthesize. Cheap models do the bulk of the work.
+This is version **2.0.1**, with no npm dependencies.
 
-Requires Node 18+, Git, a configured Git author, and your own installed, authenticated agent
-CLI. No npm dependencies. This is `2.0.0`.
+The five promises in [CONSTITUTION.md](CONSTITUTION.md):
+
+- **Cheap models do the bulk of the work.** Strong models write briefs, plans and syntheses
+  and diagnose failures. They don't do the typing.
+- **Every subscription drains at an even pace.** Work is weighted by each account's 5-hour
+  and weekly windows, so nothing runs dry early.
+- **Work runs in parallel** across agents and vendors. Code enforces each step's guarantees.
+- **Nothing spends tokens while waiting.** The tool is idle until something needs you.
+- **Any CLI, and you stay the only author.** Orchestra is vendor independent and commits
+  as your Git identity, with no AI attribution.
+
+Orchestra is not a judge: it reports facts about calls, commits, gate exits and logs; you decide quality.
+
+## How it works
+
+```text
+Your agent CLI / you
+        |
+        v
+Orchestra core
+  queue, tiers, quota balancing, questions,
+  idle waiting, resume, records
+        |
+        v
+Six blocks
+  agent, parallel, ask, gate, loop, lanes
+        |
+        v
+Workflows
+  data files + prompts + optional gate scripts
+```
+
+| Built-in workflow | What it does |
+|---|---|
+| `code` | Reads or creates a task list, runs isolated lanes, merges, runs gates and records results. |
+| `council` | Researches an unclear idea, gathers proposals and critique, then asks you to decide. |
+| `council-compare` | Uses the council steps to compare options you already have. |
+| `council-learn` | Uses the council steps for concepts, a glossary and a learning order. |
+| `council-review` | Uses the council steps for a read-only report with checked evidence. |
+| `new-workflow` | Drafts, diagrams, checks and simulates a workflow pack, then asks you to approve saving it. |
+
+Council uses **3 agents from different vendors when available, otherwise any available agents**.
+Every call has its own session. Council recommends; you decide.
+
+## Requirements
+
+- Node 18 or newer.
+- Git with `user.name` and `user.email` configured. Your project needs at least one commit.
+- At least one agent CLI that you installed and logged in to yourself.
+  Orchestra does not install or authenticate those tools.
+
+On Linux, Claude Code's sandbox needs **`bubblewrap` and `socat`**: Orchestra runs Claude's
+write calls sandboxed and never falls back to running them unsandboxed.
+
+```sh
+sudo pacman -S bubblewrap socat        # Arch
+sudo apt install bubblewrap socat      # Debian / Ubuntu
+```
+
+If they are missing, the failed call is reported with this fix and Claude is left out of the
+run. Note that `orchestra adapter test claude` makes a read-only call, so it doesn't exercise
+the write sandbox.
+
+## Install
+
+Install the CLI from this repository:
 
 ```sh
 git clone https://github.com/Soliman-Elhassanein/Agents-Orchestrator-Skill.git orchestra
 cd orchestra
 npm install -g .
+```
+
+Install the single [Agent Skills](https://agentskills.io/specification) file for your agent:
+
+```sh
+npx skills add Soliman-Elhassanein/Agents-Orchestrator-Skill --skill orchestra
+```
+
+The CLI works without the skill. After project initialization, the local copy also runs as
+`node .orchestra/engine/bin/orchestra.mjs`.
+
+## Quick start
+
+### 1. Initialize your project and set tiers
+
+```sh
 cd /path/to/your/project
 orchestra init
-# Edit .orchestra/config.json: detected models and tiers are suggestions.
+```
+
+Edit `.orchestra/config.json`. Keep its other settings and choose model names, effort levels
+and tiers that your accounts support. Detected models and tiers are suggestions.
+For the examples below, configure a cheap entry at tier 1, a working entry at tier 2 and a
+strong entry at tier 3. One CLI can supply all three. See [agents and tiers](#agents-and-tiers).
+
+```sh
 orchestra doctor
 orchestra adapter test <name>
-# In your own project, create tasks.md using the task-list example below, then commit it.
-orchestra run code --task-file tasks.md --gate "npm test" --foreground
-orchestra status
+```
+
+Replace `<name>` with a configured adapter name, such as `claude`, `codex` or `agy`.
+`doctor` checks Node, a Git commit and configured executables on PATH. It does not verify login.
+`adapter test` makes one short real read-only call and prints its outcome and log path.
+Repeat it for each CLI you plan to use.
+
+### 2. Run one task
+
+```sh
+orchestra run "Create overview.md with a short guide to this repository's main folders."
+```
+
+`run` starts a background worker, prints the run ID and watches until an event needs attention
+or a periodic check-in is due. A return from watching does not always mean execution finished.
+Use `orchestra status` to read the state. Answer any questions, then use `orchestra watch`
+to keep waiting. Commit input files first: uncommitted project changes are not part of runs.
+
+### 3. Run a task list with a gate
+
+Create `tasks.md` in your project. For example:
+
+```markdown
+## Phase 1: Core
+- [ ] T001 [P] Create src/one.js exporting a function that returns 1
+- [ ] T002 [P] Create src/two.js exporting a function that returns 2
+- [ ] T003 Create src/sum.js importing both functions and exporting their sum
+```
+
+Adapt the paths and module style to your project, then commit the task file and the
+`.gitignore` change from `init`. Run a gate that exists in your project:
+
+```sh
+orchestra run code --task-file tasks.md --gate "npm test"
+```
+
+Here `npm test` assumes your project has a test script. Repeated `--gate` arguments replace
+configured gates for that run. Gates run after each phase on the merged revision.
+
+### 4. Inspect and land
+
+```sh
+orchestra status --json
+```
+
+Wait for `completed`. Read `.orchestra/runs/<run-id>/run.json` and the logs it names.
+The status output gives the branch, normally `orchestra/<run-id>`.
+Inspect it before landing:
+
+```sh
+git log --oneline HEAD..orchestra/<run-id>
+git diff HEAD...orchestra/<run-id>
 orchestra land <target-branch>
 ```
 
-Use a gate that exists in your project; `npm test` above assumes it has a test script.
-Runs leave the checkout alone. Inspect the run branch and `run.json` before landing.
-Landing requires an explicit existing target branch, including the default branch. It never
-pushes. The installed copy also runs as `node .orchestra/engine/bin/orchestra.mjs`.
+Replace the placeholders. `land` uses the latest run unless you supply a run ID.
+Name an **existing target branch** explicitly, including when it is the default branch.
+Landing requires a completed run and a clean checkout. It switches to the target branch and
+merges the run branch. It never pushes.
 
-## A first council session
+Runs use separate branches and worktrees; your checkout stays untouched until landing.
+By default, later queued runs build on the last completed run before landing, so the task-list
+run above includes the earlier task's changes. Inspect both before keeping them.
 
-Configure a tier-1 entry and tier-3 entries from three different vendor CLIs (see below).
-Then ask an unclear question:
+### 5. Try a council session
+
+Council research requests tier 1; proposals and synthesis request tier 3.
+Configure those tiers. Three vendor CLIs are preferred, but are not required.
 
 ```sh
 orchestra run council "Should this project store its cache in files or a database?"
 orchestra status
 orchestra answer "Compare local files and a local database; portability matters most."
 orchestra watch
-# When watch reports the final decision question, read the synthesis and verification.json.
-orchestra status --json
+```
+
+Council researches, gathers independent proposals, passes anonymous peers to critique,
+checks local quotes and file references, then synthesizes a recommendation.
+If watching returns a check-in or another event, handle it and reattach with `orchestra watch`.
+When it reports the final decision question, read the synthesis in `orchestra status --json`
+and `.orchestra/runs/<run-id>/verification.json`. Then give your decision:
+
+```sh
 orchestra answer "Choose local files because the data is small and portability matters most."
 orchestra watch
 ```
 
-The worker researches, gathers independent proposals, passes anonymous peers to critique,
-checks quotes against actual files and synthesizes a recommendation. It waits without calls
-at each user question. `status --json` exposes the run ID and step outputs. Read
-`.orchestra/runs/<run-id>/verification.json` and the synthesized options before deciding.
-The result is `.orchestra/runs/<run-id>/decision.md`; you choose where to keep it. Council
-never edits the project. `council-compare`, `council-learn` and `council-review` use the same
-steps for choosing between options, learning a topic, or a read-only report.
+Council waits without calls at each user question. It never edits project files.
+Its record is `.orchestra/runs/<run-id>/decision.md`; you choose where to keep it.
+Local verification checks locations and exact quotes, not meaning. Remote sources remain unverified.
 
-## Agents and tiers
+## Concepts
+
+### Agents and tiers
 
 An entry describes a model at an effort level; the same CLI can have several entries.
 
@@ -75,88 +218,136 @@ adapter. `init` only detects tools; it does not install or authenticate them. It
 model names may need changing for your account. No detected tools produces an empty agents
 map, which you must configure before work can start.
 
-Selection balances quota within the requested tier, then moves upward when exhausted.
-Unknown quota remains unknown. If no eligible entry is available, the run waits without
-model calls and reports the reason. Startup errors exclude that entry and report an exact
-fix; ordinary failures retry with a bounded digest and escalate. A write call that changes
+Startup errors exclude that entry and report an exact fix; ordinary failures retry with a bounded digest and escalate. A write call that changes
 nothing is `no-changes`, blocks dependent work and cannot complete a run.
 
-Old role/tier configs must be replaced. `init --force` writes the new
-`orchestra.v2-adapters/1` schema. `fanout.executors` bounds lane concurrency;
-`executorRetries`, `agentTimeout` and `gateTimeout` bound attempts. `gates` contains shell
+`fanout.executors` bounds lane concurrency. `executorRetries` limits retries;
+`agentTimeout` and `gateTimeout` limit how long calls and gates may run. `gates` contains shell
 commands; repeated `--gate` arguments override them for that run.
 
-## Workflows and task lists
+### Quota balancing
 
-`run "task"` is one write agent job at tier 2 (change with `--tier`). Use `--access read`
-for a question or research task that should return an answer without editing files. It uses the same queue,
-quota, questions, resume and records as workflows. `run <workflow> "task"` selects a workflow.
-The built-in `code` workflow reads an explicit task file, or asks a tier-3 agent to write one,
-then runs cheap agents in lanes, merges, runs gates after each phase and ticks only the
-executed tasks whose gates passed. Generated task lists stay in the run folder; project task
-files are ticked on the run branch and reach your checkout when landed.
+Subscriptions have usage windows, such as a **5-hour window** and a **weekly window**.
+Where the adapter supplies them, Orchestra compares how much you used with how much time
+has passed. An account using its quota slowly gets more weight; one using it quickly gets less.
+The tightest observed window controls the weight. This helps spread work across your accounts.
 
-```markdown
-## Phase 1: Core
-- [ ] T001 [P] Create src/one.js
-- [ ] T002 [P] Create src/two.js
-- [ ] T003 Wire the two modules
-```
+- Choose within the requested tier using each entry's weight and observed quota pace.
+- Skip an account near its limit: by default, at **95%** used in any current observed window.
+  A reported active limit also excludes it. `quotaBalancing.stopAtPercent` sets the threshold.
+- If that tier has no eligible quota, go **up a tier, never down**.
+- If no eligible entry at or above the requested tier is available, wait and report why.
+  Waiting makes no model calls; read-only quota readers may refresh observations.
+- Unknown quota stays unknown. It adds no quota adjustment to the configured weight.
+  An adapter may read quota from a local source or observe it passively after a call.
 
-Parallel markers promise different files and no shared state. Consecutive marked tasks run
-independently; unmarked tasks are sequential barriers. Other tags and all non-checkbox text
-stay unchanged. A tick reports execution and gate exits, not a quality judgment.
+`orchestra quota` shows observations; `--no-refresh` shows the saved ones.
+Available windows depend on what the CLI exposes. Balancing cannot guarantee that an account
+never reaches a limit.
 
-Workflows use versioned JSON and six blocks: agent, parallel, ask, gate, loop and lanes.
-Project workflows override user workflows, which override built-ins. Each workflow has a
-finite call budget. Resume skips completed steps and continues retained lane branches.
-A merge conflict causes one redo on the merged work; a second conflict asks the user.
+### Workflows and task lists
+
+`orchestra run "task"` is one write agent job at tier 2; `--tier` changes its tier.
+Use `--access read` for an answer or research without file edits. Direct tasks use the same
+queue, quota, questions, resume and records as workflows.
+`orchestra run <workflow> "task"` selects a workflow.
+
+The `code` workflow reads an explicit task file or asks a tier-3 agent to write one.
+Cheap agents then run lanes, merge and run phase gates. Only executed tasks whose gates
+passed are ticked. Generated lists stay in the run folder. Project task files are ticked
+on the run branch and reach your checkout when landed.
+
+| Task-list element | Meaning |
+|---|---|
+| `## Phase 1: Core` | Phases run in ascending numeric order. |
+| `- [ ] T001 Create a file` | An unticked task with a unique `T` plus digits ID. |
+| `[P]` after the ID | Consecutive marked tasks may run independently in separate worktrees. |
+| An unmarked task | A sequential barrier between parallel groups. |
+| Other tags and non-checkbox text | Kept unchanged. |
+| `[x]` | Executed, merged and gates passed; you still decide quality. |
+
+A `[P]` marker promises different files and no shared state. Orchestra trusts that promise.
+Existing ticks are skipped. `fanout.executors` limits lane concurrency.
+
+Workflows are versioned JSON with six blocks: `agent`, `parallel`, `ask`, `gate`, `loop` and
+`lanes`. Project workflows override user workflows, which override built-ins. Each workflow
+has a finite call budget. Resume skips completed steps and continues retained lane branches.
+A lane merge conflict causes one redo on the merged work; a second conflict asks you.
+
 See [workflow format](docs/workflows.md), [adapter format](docs/adapters.md) and
 [records](docs/records.md) for the public interfaces.
 
-## Commands
+### Run facts
 
-```text
-run [workflow] <task> [--task-file <file>] [--tier N] [--access read|write] [--gate <cmd>]
-    [--detach|--foreground] [--every <minutes>] [--stuck-after <minutes>]
-adapter test <name>
-workflow check <file> | diagram <name|file> [--out <file>] | run <name> --dry | add <git-url|path> [--user]
-queue [add <task> | edit <id> <task> | rm <id> | move <id> <position> | hold | resume]
-status [run-id] [--json]        list
-answer [run-id] "1. … 2. …"    steer [run-id] "direction"
-stop [run-id]                 resume [run-id]
-check [--json]                watch [--every <minutes>] [--stuck-after <minutes>]
-quota [--no-refresh] [--json]  doctor
-knowledge [add <text> | approve <id> | rm <id>] [--cli <name>] [--json]
-land [run-id] <target-branch>
-```
+Each run writes `.orchestra/runs/<run-id>/run.json`, using `run-report/1`.
+It stays current while running, waiting, failed or stopped.
 
-A failed run holds the queue unless `queue.holdOnFailure` is false. By default queued tasks
-build on the last completed run before landing; `queue.buildOnPrevious:false` starts from
-the checkout. Questions go to the user and all numbered answers must be supplied. Steering
-applies at the next boundary. `watch`, `check` and quota readers make no model calls.
+| Record | What to read |
+|---|---|
+| Commits | Base and final revisions; write-step changes, diffs and commits. |
+| Tasks and steps | Execution status, selected agents and attempts. |
+| Gates | Command, exit code, tested revision and log path. |
+| Questions | Questions and user answers. |
+| Usage | Calls and reported token totals; unreported usage stays explicit. |
+| Suggestions | Project or code lessons returned by agents. |
 
-`run` starts a background worker, prints the run ID and stays attached as a watcher until
-the first attention event: questions, completion, failure, stop, crash, stuck work or quota
-waiting. Handled events exit 0. It also reports setup problems and queue holds as `watch`
-does. `--every` supplies a periodic check-in (default: `communicatorUpdateMinutes`, 15);
-`--every 0` disables check-ins. `--stuck-after` defaults to `stuckAfterMinutes`, 10.
-Watching uses no model calls. `--detach` returns immediately with the reserved run ID;
-`--foreground` processes the queue in the calling process and keeps its existing exit codes.
+`runtimeStatus` distinguishes running and waiting from terminal outcomes.
+A `completed` run reports execution and gate exits. It does not decide whether to keep the work.
+Token totals measure processed volume, including reported cache fields, not billing or account consumption.
 
-For an agent session, run `orchestra run …` in the background. When it returns, handle the
-printed event: relay questions to the user and report process facts. After handling it, run
-`orchestra watch` in the background to keep waiting until the run completes, fails or stops.
-Reported question batches are not repeated when re-attaching. `watch` exits 3 with `IDLE`
-when there is nothing to wait for.
+### Machine knowledge
 
-## Development
+Machine notes live only in `~/.config/orchestra/knowledge.json`, keyed by CLI and shared
+across projects. `orchestra knowledge` lists every CLI; `--cli my-tool` filters the list.
+`orchestra knowledge add "Use this supported flag" --cli my-tool` adds a confirmed note.
+`approve <id>` confirms a note and merges exact whitespace/case-normalized duplicates for
+that CLI; `rm <id>` removes it. Manual additions remain separate until approval.
 
-`npm test` uses a test-only mock adapter, real Git, worktrees and processes. No real model
-calls. The guard checks CLI independence and the 2,000-line core/block budget. Contribution
-rules are in [AGENTS.md](AGENTS.md).
+Startup failures automatically record what happened and the adapter's exact fix as observed
+notes. Agents may return `lessons` with `scope` and `text`: `cli` lessons become observed
+machine notes, while `project` and `code` lessons appear only in `run.json` suggestions.
+Automatic recording skips normalized duplicates already present for the same CLI.
+Project facts belong in the project's own guidance files and docs.
 
-## Add a CLI
+Each brief labels and includes every confirmed note for its CLI plus the 10 newest observed
+notes. Set `knowledgeObservedLimit` in `.orchestra/config.json` to change that limit (0 omits
+observations). Notes are advice; recording makes no additional model calls.
+
+## Using it from your agent
+
+The [standard skill](skills/orchestra/SKILL.md) compares your job with available workflows.
+It chooses a fitting workflow or runs the task as given. If the job seems too simple and
+one agent could do it directly, the skill explains that and asks you. If you insist, it runs
+through Orchestra. An answer already given is honored without asking again.
+`init` installs no per-CLI commands and does not depend on the skill.
+
+| Command or option | Behavior |
+|---|---|
+| `orchestra run …` | Starts a background worker and watches by default. |
+| `--detach` | Returns immediately with the reserved run ID. |
+| `orchestra watch` | Reattaches until an event or a periodic check-in. |
+| `--every <minutes>` | Check-in interval for `run` or `watch`; default 15 (`communicatorUpdateMinutes`). `--every 0` disables check-ins. |
+| `--stuck-after <minutes>` | Quiet-work warning interval; default 10 (`stuckAfterMinutes`). |
+| `--foreground` | Processes the queue in the calling process, without watching, using its execution exit codes. |
+
+Watching returns on questions, completion, failure, stop, crash, stuck work or quota waiting.
+It also reports setup problems and queue holds. Handled events exit 0; read the event and
+status to know the execution outcome. `watch` exits 3 with `IDLE` when nothing needs watching.
+Watching spends no model tokens.
+
+In an agent session, run `orchestra run …` as a background command. When it returns:
+
+1. Relay every numbered question to the user, or report the process event.
+2. Send the user's answers with `orchestra answer`; never answer for the user.
+3. After handling the event, run `orchestra watch` in the background until completion, failure
+   or stop. Stop watching on `IDLE`.
+
+Question batches are reported once. Wait for the user's answers before reattaching.
+`steer` applies a direction at the next boundary. `stop` and `resume` control interrupted runs.
+
+## Extending
+
+### Add a CLI
 
 Create `.orchestra/adapters/my-tool.json` (or the same file under
 `~/.config/orchestra/adapters/`) using the [adapter format](docs/adapters.md). It declares the
@@ -165,7 +356,7 @@ Add a config entry such as `"small":{"cli":"my-tool","model":"your-model","tier"
 Install and authenticate that tool yourself, then run `orchestra adapter test my-tool`.
 This makes one short real call. Adding a CLI needs no change to Orchestra's core.
 
-## Write a workflow
+### Write a workflow
 
 A workflow pack is a named folder containing `workflow.json`, prompts and optional gate
 scripts. Each includes a generated `workflow.drawio` that opens in draw.io; regenerate it with
@@ -189,34 +380,40 @@ answers; it starts no commands or model calls and does not modify files. Review 
 pack scripts before real runs. `init` ignores `.orchestra/`; if your team wants to share a
 project pack, explicitly track only `.orchestra/workflows/<name>/`.
 
-## Knowledge and the standard skill
+## Command reference
 
-Machine notes live only in `~/.config/orchestra/knowledge.json`, keyed by CLI and shared
-across projects. `orchestra knowledge` lists every CLI; `--cli my-tool` filters the list.
-`orchestra knowledge add "Use this supported flag" --cli my-tool` adds a confirmed note.
-`approve <id>` confirms a note and merges exact whitespace/case-normalized duplicates for
-that CLI; `rm <id>` removes it. Manual additions remain separate until approval.
-
-Startup failures automatically record what happened and the adapter's exact fix as observed
-notes. Agents may return `lessons` with `scope` and `text`: `cli` lessons become observed
-machine notes, while `project` and `code` lessons appear only in `run.json` suggestions.
-Automatic recording skips normalized duplicates already present for the same CLI.
-Project facts belong in the project's own guidance files and docs.
-
-Each brief labels and includes every confirmed note for its CLI plus the 10 newest observed
-notes. Set `knowledgeObservedLimit` in `.orchestra/config.json` to change that limit (0 omits
-observations). Notes are advice; recording makes no additional model calls.
-
-Install the single [Agent Skills](https://agentskills.io/specification) file for your agent:
-
-```sh
-npx skills add Soliman-Elhassanein/Agents-Orchestrator-Skill --skill orchestra
+```text
+init [--force]
+run [workflow] [<task>] [--task-file <file>] [--tier N] [--access read|write] [--gate <cmd>]
+    [--detach|--foreground] [--every <minutes>] [--stuck-after <minutes>]
+adapter test <name>
+workflow check <file> | diagram <name|file> [--out <file>] | run <name> --dry | add <git-url|path> [--user]
+queue [add <task> | edit <id> <task> | rm <id> | move <id> <position> | hold | resume]
+status [run-id] [--json]        list
+answer [run-id] "1. … 2. …" | answer [run-id] --file <file>
+steer [run-id] "direction" | steer [run-id] --file <file>
+stop [run-id]                 resume [run-id]
+check [--json]                watch [--every <minutes>] [--stuck-after <minutes>]
+quota [--no-refresh] [--json]  doctor
+knowledge [add <text> | approve <id> | rm <id>] [--cli <name>] [--json]
+land [run-id] <target-branch>
 ```
 
-The skill compares a job with available workflows, uses a fitting workflow or runs the task
-as given. If the job seems too simple for Orchestra it asks you; an insistence runs it anyway.
-It relays questions, reads status and waits without extra model calls. `orchestra init`
-installs no per-CLI commands and does not depend on the skill.
+Prefix each command above with `orchestra`. A run needs task text or `--task-file`.
+`knowledge add` requires `--cli <name>`.
+
+A failed run holds the queue unless `queue.holdOnFailure` is false. By default queued tasks
+build on the last completed run before landing; `queue.buildOnPrevious:false` starts from
+the checkout. Questions go to the user and all numbered answers must be supplied. Steering
+applies at the next boundary. `watch`, `check` and quota readers make no model calls.
+
+## Development
+
+`npm test` is the delivery gate. It uses a test-only mock adapter, real Git, worktrees and
+processes. It covers adapters, quota selection, retries, the six blocks, queue and watching,
+questions, resume, merges, gates, task ticking, workflow tools, council evidence checks,
+diagrams and machine knowledge. It makes no real model calls.
+Contribution rules are in [AGENTS.md](AGENTS.md).
 
 ## Credits
 
@@ -225,3 +422,7 @@ adapted from the relay scripts of [delegate-skills](https://github.com/amElnagdy
 by Ahmed Mohammed, under the MIT License. See [NOTICE](NOTICE) and [CITATION.cff](CITATION.cff).
 
 The principles every change must keep are in [CONSTITUTION.md](CONSTITUTION.md).
+
+## License
+
+MIT. See [LICENSE](LICENSE).
