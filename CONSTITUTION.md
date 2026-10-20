@@ -27,7 +27,7 @@ Five promises define Orchestra. Every change must keep all five.
 Orchestra is not:
 - **a judge.** It reports facts (what ran, which commits, which gates exited 0) and never
   decides whether work is "good" or "done". A loop stops only on a field in a step's structured
-  output, read mechanically. Workflows that recommend (council) leave the decision to you.
+  output, read mechanically. Workflows that recommend leave the decision to you.
 - **a general agent framework.** It has a small, closed set of blocks. A new block needs a real
   workflow that the existing blocks can't express.
 - **a place for custom code per job.** Workflows are data files and prompts. The engine never
@@ -61,4 +61,4 @@ Every change must preserve the five promises, pass the spirit test and respect t
 Procedures belong in workflow files; reusable guarantees belong in the six blocks.
 Amend this constitution explicitly before changing the product's direction.
 
-**Version**: 1.0.0 | **Ratified**: 2026-10-20 | **Last amended**: 2026-10-20
+**Version**: 1.0.1 | **Ratified**: 2026-10-20 | **Last amended**: 2026-10-20
