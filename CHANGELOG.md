@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.1.1 — 2026-10-21
+
+- Skill: always re-attach `watch` until `IDLE`, including across queued runs, and brief the
+  user on every wake-up and check-in (what happened, progress, what needs them, what's next).
+
 ## 2.1.0 — 2026-10-20
 
 - Enforce constitution 1.1.0 promise 1 in the engine: highest-tier, read-only plans,

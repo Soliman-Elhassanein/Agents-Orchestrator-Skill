@@ -4,7 +4,7 @@
 
 Orchestra is a Node CLI that coordinates your agent CLIs for code, research, review and
 deliberation. Strong models plan and synthesize. Cheap models do the bulk of the work.
-This is version **2.1.0**, with no npm dependencies.
+This is version **2.1.1**, with no npm dependencies.
 
 The five promises in [CONSTITUTION.md](CONSTITUTION.md):
 
@@ -363,10 +363,12 @@ Watching spends no model tokens.
 
 In an agent session, run `orchestra run …` as a background command. When it returns:
 
-1. Relay every numbered question to the user, or report the process event.
+1. Brief the user: what happened, progress (step, tasks done, gates), what needs them (every
+   numbered question, or nothing) and what comes next. Periodic check-ins (every 15 minutes by
+   default) get the same brief.
 2. Send the user's answers with `orchestra answer`; never answer for the user.
-3. After handling the event, run `orchestra watch` in the background until completion, failure
-   or stop. Stop watching on `IDLE`.
+3. Run `orchestra watch` in the background again, and keep re-attaching while anything is
+   running or queued. Stop only on `IDLE`.
 
 Question batches are reported once. Wait for the user's answers before reattaching.
 `steer` applies a direction at the next boundary. `stop` and `resume` control interrupted runs.

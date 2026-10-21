@@ -24,10 +24,18 @@ Do not install tools, invent model names or assume subscriptions.
 - Explicit task list: `orchestra run code --task-file <path> --gate "<command>"`.
 - Workflow checks: `orchestra workflow check <file>` and `orchestra workflow run <name> --dry`.
 - Status: `orchestra status --json`, `orchestra check --json`, and the run's `run.json`.
-- Run `orchestra run …` in the background; it waits without model calls. When it returns,
-  handle the event it printed: relay questions and report facts. Then run `orchestra watch`
-  in the background to keep waiting until the run is completed, failed or stopped. On IDLE,
-  stop watching. Use `--every` and `--stuck-after` on either command to adjust check-ins.
+- **Always keep watching.** Run `orchestra run …` in the background; it waits without model
+  calls. Every time it or `orchestra watch` returns, brief the user, then run `orchestra watch`
+  in the background again: immediately, or right after sending the answers when the event was
+  a question. Keep doing this while anything is running or
+  queued; stop only when `watch` prints `IDLE` (nothing running, nothing queued).
+- **Brief on every wake-up**, including the periodic check-in (every 15 minutes by default,
+  `communicatorUpdateMinutes` in the config; `--every` and `--stuck-after` adjust it):
+  1. **What happened**: the event (question, done, failed, stopped, stuck, quota) in one line.
+  2. **Progress**: run id, current step or phase, tasks done / total, gates passed or failed.
+  3. **Needs you**: every open question with its number, or "nothing".
+  4. **Next**: what Orchestra does next, and what is still queued.
+  Keep it short and factual; read `orchestra status` if the event alone doesn't say enough.
 
 When a run awaits the user, show every question and its number. Relay the user's answers
 with `orchestra answer [run-id] "1. … 2. …"` or `--file <answers-file>`. Never answer for the
