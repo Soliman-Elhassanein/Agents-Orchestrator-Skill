@@ -4,7 +4,7 @@
 
 Orchestra is a Node CLI that coordinates your agent CLIs for code, research, review and
 deliberation. Strong models plan and synthesize. Cheap models do the bulk of the work.
-This is version **2.1.1**, with no npm dependencies.
+This is version **2.2.0**, with no npm dependencies.
 
 The five promises in [CONSTITUTION.md](CONSTITUTION.md):
 
@@ -41,17 +41,10 @@ Workflows
   data files + prompts + optional gate scripts
 ```
 
-| Built-in workflow | What it does |
-|---|---|
-| `code` | Reads or creates a task list, runs isolated lanes, merges, runs gates and records results. |
-| `council` | Researches an unclear idea, gathers proposals and critique, then asks you to decide. |
-| `council-compare` | Uses the council steps to compare options you already have. |
-| `council-learn` | Uses the council steps for concepts, a glossary and a learning order. |
-| `council-review` | Uses the council steps for a read-only report with checked evidence. |
-| `new-workflow` | Drafts, diagrams, checks and simulates a workflow pack, then asks you to approve saving it. |
-
-Council uses **3 agents from different vendors when available, otherwise any available agents**.
-Every call has its own session. Council recommends; you decide.
+Workflows describe themselves. `orchestra workflow list` shows every workflow available to
+you, built in, installed for your user or in your project, with what it does, what to give
+it, what it returns and the path to its guide. Orchestra ships built-in workflows for
+writing code, deliberating and creating new workflows. Every call has its own session.
 
 ## Requirements
 
@@ -126,28 +119,7 @@ or a periodic check-in is due. A return from watching does not always mean execu
 Use `orchestra status` to read the state. Answer any questions, then use `orchestra watch`
 to keep waiting. Commit input files first: uncommitted project changes are not part of runs.
 
-### 3. Run a task list with a gate
-
-Create `tasks.md` in your project. For example:
-
-```markdown
-## Phase 1: Core
-- [ ] T001 [P] Create src/one.js exporting a function that returns 1
-- [ ] T002 [P] Create src/two.js exporting a function that returns 2
-- [ ] T003 Create src/sum.js importing both functions and exporting their sum
-```
-
-Adapt the paths and module style to your project, then commit the task file and the
-`.gitignore` change from `init`. Run a gate that exists in your project:
-
-```sh
-orchestra run code --task-file tasks.md --gate "npm test"
-```
-
-Here `npm test` assumes your project has a test script. Repeated `--gate` arguments replace
-configured gates for that run. Gates run after each phase on the merged revision.
-
-### 4. Inspect and land
+### 3. Inspect and land
 
 ```sh
 orchestra status --json
@@ -169,37 +141,19 @@ Landing requires a completed run and a clean checkout. It switches to the target
 merges the run branch. It never pushes.
 
 Runs use separate branches and worktrees; your checkout stays untouched until landing.
-By default, later queued runs build on the last completed run before landing, so the task-list
-run above includes the earlier task's changes. Inspect both before keeping them.
+By default, later queued runs build on the last completed run before landing, so a later
+run includes the earlier task's changes. Inspect both before keeping them.
 
-### 5. Try a council session
-
-Council research requests tier 1 and proposals request tier 3; engine syntheses use the
-highest configured tier.
-Configure those tiers. Three vendor CLIs are preferred, but are not required.
+### 4. Choose a workflow
 
 ```sh
-orchestra run council "Should this project store its cache in files or a database?"
-orchestra status
-orchestra answer "Compare local files and a local database; portability matters most."
-orchestra watch
+orchestra workflow list
 ```
 
-Council researches, gathers independent proposals and passes anonymous peers to critique.
-The engine synthesizes each parallel block; a gate checks local quotes and file references
-before you decide.
-If watching returns a check-in or another event, handle it and reattach with `orchestra watch`.
-When it reports the final decision question, read the synthesis in `orchestra status --json`
-and `.orchestra/runs/<run-id>/verification.json`. Then give your decision:
-
-```sh
-orchestra answer "Choose local files because the data is small and portability matters most."
-orchestra watch
-```
-
-Council waits without calls at each user question. It never edits project files.
-Its record is `.orchestra/runs/<run-id>/decision.md`; you choose where to keep it.
-Local verification checks locations and exact quotes, not meaning. Remote sources remain unverified.
+Each entry says what the workflow does, what to give it, with an example command, and what
+it returns. Its guide, a `README.md` in the workflow's folder, walks through a full run.
+Run one with `orchestra run <workflow> "<task>"`, then answer its questions with
+`orchestra answer` and keep waiting with `orchestra watch`.
 
 ## Concepts
 
@@ -260,7 +214,7 @@ Use `--access read` for an answer or research without file edits. Direct tasks u
 queue, quota, questions, resume and records as workflows.
 `orchestra run <workflow> "task"` selects a workflow.
 
-The `code` workflow is a single `lanes` block. The engine reads an explicit task file or
+The `lanes` block runs a task list. The engine reads an explicit task file or
 asks a highest-tier agent to write one. It prepares briefs for cheap workers, then runs
 lanes, merges and runs phase gates. Only executed tasks whose gates
 passed are ticked. Generated lists stay in the run folder. Project task files are ticked
@@ -296,9 +250,7 @@ Their prompts ship with the engine and workflows cannot disable them. Budget for
   also use diagnosis; phase gates repair the phase's tasks on the merged tree. Startup
   failures do not trigger diagnosis. Retries and failed starts count against the call budget.
 
-A typical council session makes nine calls (one research, three proposals, three critiques
-and two engine syntheses); a second critique round adds four. These counts exclude retries.
-Strong calls appear in `run.json` with `purpose`: `plan`, `brief`, `diagnosis` or `synthesis`.
+Each workflow's guide gives its typical call count. Strong calls appear in `run.json` with `purpose`: `plan`, `brief`, `diagnosis` or `synthesis`.
 
 See [workflow format](docs/workflows.md), [adapter format](docs/adapters.md) and
 [records](docs/records.md) for the public interfaces.
@@ -388,7 +340,10 @@ This makes one short real call. Adding a CLI needs no change to Orchestra's core
 
 A workflow pack is a named folder containing `workflow.json`, prompts and optional gate
 scripts. Each includes a generated `workflow.drawio` that opens in draw.io; regenerate it with
-`orchestra workflow diagram <name|path-to-workflow.json>` after changing the JSON. [Workflow format v1](docs/workflows.md) documents the six blocks and annotated
+`orchestra workflow diagram <name|path-to-workflow.json>` after changing the JSON. Every pack
+has a required `description` saying what it does, what to give it and what it returns;
+`orchestra workflow list` shows each available workflow with its description.
+[Workflow format v2](docs/workflows.md) documents the six blocks and annotated
 examples. Put cheap bulk calls at tier 1, strong proposals at tier 3, a finite call budget
 on every workflow and a maximum on every loop. Keep workflow files as data.
 
@@ -398,9 +353,11 @@ orchestra workflow check ./my-workflow/workflow.json
 orchestra workflow add ./my-workflow
 orchestra workflow run my-workflow --dry
 orchestra run my-workflow "The job"
-# Or draft a pack interactively, then check, simulate and approve its installation:
-orchestra run new-workflow "Describe the repeated job"
 ```
+
+To draft a pack interactively instead, use the built-in authoring workflow shown by
+`orchestra workflow list`; it requires a description and saves only after your approval.
+A pack may include a `README.md` guide; `workflow list` shows its path.
 
 `workflow add` also accepts a Git URL or `--user` for installation across projects. Existing
 names are never overwritten. Dry mode shows all bounded steps with mock agents, gates and
@@ -415,7 +372,7 @@ init [--force]
 run [workflow] [<task>] [--task-file <file>] [--tier N] [--access read|write] [--gate <cmd>]
     [--detach|--foreground] [--every <minutes>] [--stuck-after <minutes>]
 adapter test <name>
-workflow check <file> | diagram <name|file> [--out <file>] | run <name> --dry | add <git-url|path> [--user]
+workflow list [--json] | check <file> | diagram <name|file> [--out <file>] | run <name> --dry | add <git-url|path> [--user]
 queue [add <task> | edit <id> <task> | rm <id> | move <id> <position> | hold | resume]
 status [run-id] [--json]        list
 answer [run-id] "1. … 2. …" | answer [run-id] --file <file>
@@ -439,7 +396,7 @@ applies at the next boundary. `watch`, `check` and quota readers make no model c
 
 `npm test` is the delivery gate. It uses a test-only mock adapter, real Git, worktrees and
 processes. It covers adapters, quota selection, retries, the six blocks, queue and watching,
-questions, resume, merges, gates, task ticking, workflow tools, council evidence checks,
+questions, resume, merges, gates, task ticking, workflow tools, evidence checks,
 diagrams and machine knowledge. It makes no real model calls.
 Contribution rules are in [AGENTS.md](AGENTS.md).
 

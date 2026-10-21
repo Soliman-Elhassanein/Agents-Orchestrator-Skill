@@ -1,5 +1,6 @@
 {
-  "workflow": 1,
+  "workflow": 2,
+  "description": "Teaches a topic: concepts, a glossary, what to learn first and in what order, and questions to ask next, checked by independent agents and anonymous critique. Give the topic: orchestra run council-learn \"How does this repository's queue work?\". Returns the synthesis and decision.md in the run folder; it never edits project files.",
   "budget": {
     "calls": 16
   },

@@ -6,7 +6,7 @@
  * status [id] [--json] | list | check [--json] | watch | quota [--no-refresh] [--json]
  * run / watch: [--every <minutes>] [--stuck-after <minutes>] — run watches unless detached or foreground
  * queue [add|edit|rm|move|hold|resume] | adapter test <name>
- * workflow check <file> | diagram <name|file> [--out <file>] | run <name> --dry | add <path|git-url> [--user]
+ * workflow list [--json] | check <file> | diagram <name|file> [--out <file>] | run <name> --dry | add <path|git-url> [--user]
  * knowledge [add <text>|approve <id>|rm <id>] [--cli <name>] [--json] | land [id] <target-branch> | doctor
  */
 import { spawn, spawnSync } from "node:child_process";
@@ -17,7 +17,7 @@ import { detectedAgents, loadAdapter, quotaKey, runAgent } from "../lib/agents.m
 import { loadConfig } from "../lib/config.mjs";
 import * as g from "../lib/git.mjs";
 import * as queue from "../lib/queue.mjs";
-import { loadWorkflow, workflowFile, builtinWorkflows, checkWorkflow, dryWorkflow, addWorkflow } from "../lib/workflows.mjs";
+import { listWorkflows, loadWorkflow, workflowFile, builtinWorkflows, checkWorkflow, dryWorkflow, addWorkflow } from "../lib/workflows.mjs";
 import { writeWorkflowDiagram } from "../tools/diagram.mjs";
 import { runLoop } from "../lib/runner.mjs";
 import { RunState, latestRunId, listRuns, newRunId, oneLine } from "../lib/state.mjs";
@@ -694,7 +694,14 @@ const [command, ...rest] = process.argv.slice(2);
 try { switch (command) {
   case "workflow": {
     const [sub,value,...flags]=rest;
-    if(!value)die('workflow check <file> | diagram <name|file> [--out <file>] | run <name> --dry | add <path|git-url> [--user]');
+    if(sub==='list' && (!value || value==='--json') && !flags.length){
+      const packs=listWorkflows(g.repoRoot(process.cwd()) ?? process.cwd());
+      if(value)console.log(JSON.stringify(packs,null,2));
+      else if(!packs.length)console.log('No workflows found.');
+      else for(const p of packs)console.log(`${p.name}  (${p.source})\n  ${p.error?`invalid: ${p.error}`:p.description ?? 'no description (workflow v1)'}${p.guide?`\n  Guide: ${p.guide}`:''}`);
+      break;
+    }
+    if(!value)die('workflow list [--json] | check <file> | diagram <name|file> [--out <file>] | run <name> --dry | add <path|git-url> [--user]');
     if(sub==='diagram' && (!flags.length || flags.length===2 && flags[0]==='--out')){const file=existsSync(resolve(value))?resolve(value):workflowFile(g.repoRoot(process.cwd()) ?? process.cwd(),value);checkWorkflow(file,false);console.log(writeWorkflowDiagram(file,flags[1]?resolve(flags[1]):undefined));}
     else if(sub==='check' && !flags.length){checkWorkflow(resolve(value));console.log('Workflow valid.');}
     else if(sub==='run' && flags.join(' ')==='--dry')dryWorkflow(loadWorkflow(g.repoRoot(process.cwd()) ?? process.cwd(),value));

@@ -3,10 +3,10 @@ name: orchestra
 description: Run tasks and workflows through Orchestra, inspect execution status, and relay its questions to the user. Use when the user requests Orchestra or needs its configured agents, quota balancing or isolated parallel execution.
 ---
 
-Compare the job with available workflows before starting. Read project packs in
-`.orchestra/workflows/`, user packs in `~/.config/orchestra/workflows/`, then built-ins in
-`.orchestra/engine/workflows/`; the first name match wins. Inspect workflow prompts to
-understand fit. When showing a workflow to the user, point to its `workflow.drawio` so they
+Compare the job with available workflows before starting. Run `orchestra workflow list` to
+see every workflow in search order with its description: what it does, what to give it and
+what it returns. Judge fit from the description, and read the guide it lists for how a full run goes; a
+workflow without a description (format v1) needs its prompts read. When showing a workflow to the user, point to its `workflow.drawio` so they
 can open it in draw.io or the Draw.io extension in VS Code. Regenerate it from workflow.json
 with `orchestra workflow diagram <name>` if missing or stale; never edit it by hand. A workflow fits: run it. None fits: run the task as given. If the job seems
 too simple for Orchestra and this agent could do it directly, explain that and ask the user;
@@ -19,9 +19,9 @@ If the project has no installation, run `orchestra init` in its Git repository a
 that the user must install and authenticate their own CLIs and configure model tiers.
 Do not install tools, invent model names or assume subscriptions.
 
-- Workflow: `orchestra run <workflow> "<task>"`.
+- Workflow: `orchestra run <workflow> "<task>"`, given as its description shows, optionally
+  with `--task-file <path>` and `--gate "<command>"`.
 - Bare task: `orchestra run "<task>"`, optionally `--tier N` or `--access read`.
-- Explicit task list: `orchestra run code --task-file <path> --gate "<command>"`.
 - Workflow checks: `orchestra workflow check <file>` and `orchestra workflow run <name> --dry`.
 - Status: `orchestra status --json`, `orchestra check --json`, and the run's `run.json`.
 - **Always keep watching.** Run `orchestra run …` in the background; it waits without model
@@ -45,7 +45,7 @@ applies at the next boundary; `stop` and `resume` control interrupted runs.
 
 Report process status, commits, gate exits, logs and unknown token counts as facts.
 Completion describes execution. The user decides quality and whether to keep the result.
-Council leaves a decision record in its run folder; the user decides where to keep it.
+A record a workflow leaves in its run folder stays there; the user decides where to keep it.
 Land only onto a branch the user names with `orchestra land [run-id] <target-branch>`.
 Never push without an explicit instruction.
 

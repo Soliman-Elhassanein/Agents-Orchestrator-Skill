@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.2.0 — 2026-10-21
+
+- Workflow format v2 adds a required `description`: what the workflow does, what to give
+  it with an example command, and what it returns. v1 packs keep working without one.
+- Add `orchestra workflow list [--json]`, showing every workflow in search order with its
+  source and description.
+- Built-in packs move to v2 and carry their own descriptions. `new-workflow` asks for a
+  description and rejects drafts without one.
+- Each built-in workflow explains itself in a `README.md` guide in its own folder, which
+  `workflow list` shows. The README, format docs and skill no longer name or describe any
+  workflow; the skill judges fit from `workflow list`. A test enforces that.
+
 ## 2.1.1 — 2026-10-21
 
 - Skill: always re-attach `watch` until `IDLE`, including across queued runs, and brief the

@@ -1,5 +1,6 @@
 {
-  "workflow": 1,
+  "workflow": 2,
+  "description": "Builds a new workflow pack with you. It asks for a description of the repeated job, drafts the pack, checks it, generates its diagram and simulates it, then asks you to approve saving it to the project or your user folder. Give the job: orchestra run new-workflow \"Triage new issues each morning\". Returns the saved pack, or nothing if you decline.",
   "budget": {
     "calls": 6
   },

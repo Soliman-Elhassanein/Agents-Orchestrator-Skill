@@ -1,5 +1,6 @@
 {
-  "workflow": 1,
+  "workflow": 2,
+  "description": "Reviews code or a document read-only and reports observations with checked evidence, never tasks or edits. Independent agents review and critique each other anonymously. Give what to review: orchestra run council-review \"Review src/queue for error handling\". Returns the report and decision.md in the run folder.",
   "budget": {
     "calls": 16
   },

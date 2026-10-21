@@ -1,5 +1,6 @@
 {
-  "workflow": 1,
+  "workflow": 2,
+  "description": "Helps you decide an unclear question. It frames the question with you, researches, gathers three independent proposals, runs anonymous critique and checks local quotes, then asks for your decision. Give the question: orchestra run council \"Should the cache use files or a database?\". Returns decision.md in the run folder; it never edits project files.",
   "budget": {
     "calls": 16
   },

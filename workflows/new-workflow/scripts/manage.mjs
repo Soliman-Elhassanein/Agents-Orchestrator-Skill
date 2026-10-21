@@ -16,7 +16,9 @@ if(mode==='check') {
     if(existsSync(file) && realpathSync(file)!==resolve(file))throw new Error('draft file is a link');
     writeFileSync(file,text);
   }
-  checkWorkflow(join(folder,'workflow.json'),false);console.log('Workflow structure valid.');
+  // New packs must describe themselves; v1 has no description field.
+  if(checkWorkflow(join(folder,'workflow.json'),false).workflow!==2)throw new Error('drafts use workflow format 2 with a description');
+  console.log('Workflow structure valid.');
 } else if(mode==='diagram') {
   const file=writeWorkflowDiagram(join(folder,'workflow.json')),preview=join(runDir,'workflows/workflow.drawio');
   copyFileSync(file,preview);console.log(preview);

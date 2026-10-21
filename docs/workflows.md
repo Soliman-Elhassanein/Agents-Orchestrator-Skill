@@ -1,4 +1,4 @@
-# Workflow format v1
+# Workflow format v2
 
 Workflows are JSON, with a `.json` extension. A pack contains `workflow.json` and prompt
 files. Search order is `.orchestra/workflows/<name>/workflow.json`, then
@@ -7,7 +7,8 @@ A `<name>.json` file in each folder also works. The first match wins.
 
 ```json
 {
-  "workflow": 1,
+  "workflow": 2,
+  "description": "Compares two designs for a question. Give the question: orchestra run my-pack \"Files or a database for the cache?\". Returns the chosen option and why.",
   "budget": {"calls": 8},
   "steps": [
     {"id":"facts", "agent":{"prompt":"research.md", "tier":1, "access":"read"}},
@@ -17,6 +18,19 @@ A `<name>.json` file in each folder also works. The first match wins.
   ]
 }
 ```
+
+`description` is required. It is how people and agents learn what a pack is for, so say
+what the workflow does, what to give it, with one example `orchestra run` command, and what
+it returns. `orchestra workflow list` prints every workflow found in the search order with
+its source and description; `--json` gives the same as data.
+
+Version 1 is the same format without `description`. Orchestra still runs v1 packs, and
+`workflow list` shows them as having no description; add `description` and set
+`"workflow": 2` to upgrade one. The built-in authoring workflow only saves v2 packs.
+
+A pack may also include a `README.md` guide that walks through a full run: an example
+session, what each step asks and the files it leaves. `workflow list` prints its path.
+Keep everything specific to a workflow in its pack, not in Orchestra's own docs.
 
 Each step has a unique `id` and exactly one of six blocks. No embedded functions or
 expressions are evaluated. Prompts are files relative to the pack. They receive the original
@@ -106,7 +120,8 @@ why. Unknown quota stays unknown and keeps weight 1. Nothing falls back to a low
 
 ## Task lists and records
 
-Give the path explicitly: `orchestra run code --task-file tasks.md --foreground`.
+Give the path explicitly to a workflow with a `lanes` block:
+`orchestra run <workflow> --task-file tasks.md --foreground`.
 Omit `--foreground` to start the worker and watch in the calling process until an attention
 event or periodic check-in; use `--detach` to return immediately with the run ID.
 After handling a question or another event, re-attach with `orchestra watch`.
@@ -150,12 +165,12 @@ branch. Landing never pushes.
 ## Check, simulate and install
 
 ```sh
+orchestra workflow list
 orchestra workflow diagram ./my-pack/workflow.json
 orchestra workflow check ./my-pack/workflow.json
 orchestra workflow add ./my-pack
 orchestra workflow add https://example.org/team/workflow-pack.git --user
 orchestra workflow run my-pack --dry
-orchestra run new-workflow "A repeatable job" --foreground
 ```
 
 A pack is either a named folder with `workflow.json`, prompts and scripts, or a folder of
@@ -179,40 +194,6 @@ phase counts, quota and retries can change the actual call count. It never invok
 quota reader or user question, and never writes files. This checks the bounded execution
 shape; real command exits and agent output contents still need an actual run.
 
-`new-workflow` asks for a description, drafts workflow data with a tier-3 read-only call,
-checks its structure, generates its diagram in a gate, checks the full pack and simulates it,
-then waits for `approve project` or `approve user` before copying it.
-The diagram gate also copies the diagram to `workflows/workflow.drawio` inside the run folder,
-so the approval question can give its exact path for inspection before saving;
-the installed pack includes this diagram. Drafts live inside the run's `workflows/` folder. It can create only workflow JSON and Markdown
-prompts; gates reference existing commands. If the job seems too simple it asks; an insistence
-builds it. If the six blocks cannot express a step it says "this needs a 7th block" and asks
-how to proceed. It never changes engine source.
-
 For anonymous peer input use `parallel.anonymize:true`: selected item arrays exclude the
 recipient's vendor, receive neutral peer labels, and have configured agent identifiers and
 identity metadata removed. Outputs must also omit self-identification in their prose.
-
-## Council sessions
-
-`council`, `council-compare`, `council-learn` and `council-review` share framing, proposals,
-critique, verification and decision prompts, using the engine synthesis after each parallel block. Their research prompt selects the
-mode. Each requests 3 agents at tier 3 or above, from different vendors when available,
-otherwise any available agents. Research requests tier 1.
-All agent steps use read access. Proposals have independent sessions; critique receives
-anonymous peers and stops on the first response's structured `stop:true`, with at most two
-rounds. If the bound is reached without that field, dependent steps stop.
-
-Agents declare local evidence as `evidence:[{file,line,endLine,quote}]`. The standard-library
-`scripts/verify-quotes` gate checks every declared exact quote against its claimed real file
-and line range. It also scans prose for file:line references and quotations; undeclared
-quotations and remote sources stay unverified. A verified location proves existence only,
-never the meaning of a claim. Checks run after the engine syntheses and before the user decides. Results are in
-`verification.json` and the gate logs; mismatches
-are marked unverified for the user, rather than silently accepted or retried by a model.
-
-The final user answer becomes the decision text in `decision.md` in the run folder. It has
-Date, Question, Decision, Rejected options, Open questions and Sources, including verification
-labels. The final critique block’s `synthesis` supplies proposed rejected options and open questions for user confirmation;
-a JSON answer with `decision`, `rejectedOptions` and `openQuestions` replaces those tables. Council never edits project files. Copy the record
-to a destination you choose when you want to keep it.

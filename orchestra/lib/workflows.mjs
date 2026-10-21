@@ -14,13 +14,30 @@ export function workflowFile(root,name) {
   if(!file)throw new Error(`workflow ${name} not found`);
   return file;
 }
+// Every workflow name in search order; the first match wins, as in workflowFile.
+export function listWorkflows(root) {
+  const found=new Map();
+  for(const [source,dir] of [['project',join(root,'.orchestra/workflows')],['user',join(homedir(),'.config/orchestra/workflows')],['built-in',builtinWorkflows]]) {
+    if(!existsSync(dir))continue;
+    for(const entry of readdirSync(dir).sort()) {
+      const name=entry.replace(/\.json$/,''),file=entry.endsWith('.json')?join(dir,entry):join(dir,entry,'workflow.json');
+      if(!/^[\w-]+$/.test(name) || found.has(name) || !existsSync(file))continue;
+      try {const w=JSON.parse(readFileSync(file,'utf8'));validateWorkflow(w,dirname(file));const guide=join(dirname(file),'README.md');found.set(name,{name,source,file,version:w.workflow,description:w.description ?? null,guide:!entry.endsWith('.json') && existsSync(guide)?guide:null});}
+      catch(e){found.set(name,{name,source,file,error:e.message});}
+    }
+  }
+  return [...found.values()].sort((a,b)=>a.name.localeCompare(b.name));
+}
 export function loadWorkflow(root,name) {
   const file=workflowFile(root,name),data=JSON.parse(readFileSync(file,'utf8'));validateWorkflow(data,dirname(file));
   return { ...data, dir:dirname(file) };
 }
 export function validateWorkflow(w,dir) {
-  if(!w || Object.keys(w).some((k)=>!['workflow','budget','steps'].includes(k)) || Object.keys(w.budget ?? {}).some((k)=>k!=='calls'))throw new Error('unknown workflow field; workflows contain data only');
-  if(w.workflow!==1 || !Number.isSafeInteger(w.budget?.calls) || w.budget.calls<1)throw new Error('workflow v1 requires a positive calls budget');
+  // v2 adds a required description; v1 packs without one remain valid.
+  const fields=w?.workflow===2?['workflow','description','budget','steps']:['workflow','budget','steps'];
+  if(!w || Object.keys(w).some((k)=>!fields.includes(k)) || Object.keys(w.budget ?? {}).some((k)=>k!=='calls'))throw new Error('unknown workflow field; workflows contain data only');
+  if(![1,2].includes(w.workflow) || !Number.isSafeInteger(w.budget?.calls) || w.budget.calls<1)throw new Error('workflow v1 or v2 requires a positive calls budget');
+  if(w.workflow===2 && (typeof w.description!=='string' || !w.description.trim()))throw new Error('workflow v2 requires a description: what it does, what to give it and what it returns');
   const walk=(steps)=>{
     if(!Array.isArray(steps) || !steps.length)throw new Error('steps must be non-empty');
     const ids=new Set();

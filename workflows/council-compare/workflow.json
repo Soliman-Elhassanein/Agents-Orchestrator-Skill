@@ -1,5 +1,6 @@
 {
-  "workflow": 1,
+  "workflow": 2,
+  "description": "Compares options you already have, with research, three independent proposals, anonymous critique and checked quotes, then asks for your choice. Give the question and the options: orchestra run council-compare \"SQLite or Postgres for the local cache?\". Returns decision.md in the run folder; it never edits project files.",
   "budget": {
     "calls": 16
   },

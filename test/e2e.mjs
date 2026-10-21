@@ -475,7 +475,7 @@ Object.assign(tests, {
   },
   'step 6: author workflow waits for approval and saves only workflow files'() {
     const dir=project(),pack=join(dir,'input.json');
-    writeFileSync(pack,JSON.stringify({name:'example',files:{'workflow.json':JSON.stringify({workflow:1,budget:{calls:1},steps:[{id:'read',agent:{prompt:'read.md',access:'read'}}]}),'read.md':'ORCHESTRA ROLE: example\nCYCLE: 1\nRead only.'}}));
+    writeFileSync(pack,JSON.stringify({name:'example',files:{'workflow.json':JSON.stringify({workflow:2,description:'Reads the project. Give a question. Returns an answer.',budget:{calls:1},steps:[{id:'read',agent:{prompt:'read.md',access:'read'}}]}),'read.md':'ORCHESTRA ROLE: example\nCYCLE: 1\nRead only.'}}));
     orch(dir,['run','new-workflow','create a repeatable reader','--detach'],{MOCK_PACK_FILE:pack});waitFor(()=>state(dir).status==='awaiting_user','description');
     assert.equal(report(dir).tokens.calls,0);orch(dir,['answer','Build it anyway.']);waitFor(()=>state(dir).questions?.origin==='approve','approval');
     assert.equal(existsSync(join(dir,'.orchestra/workflows/example')),false);
@@ -572,8 +572,46 @@ Object.assign(tests, {
   'step 6: a draft cannot add source code and declined installation writes no project pack'() {
     const dir=project(),pack=join(dir,'bad-pack.json');writeFileSync(pack,JSON.stringify({name:'bad',files:{'workflow.json':JSON.stringify({workflow:1,budget:{calls:1},steps:[{id:'ask',ask:{questions:['Choose?']}}]}),'engine.mjs':'process.exit()'}}));
     orch(dir,['run','new-workflow','draft this','--detach'],{MOCK_PACK_FILE:pack});waitFor(()=>state(dir).status==='awaiting_user','bad draft description');orch(dir,['answer','Build it.']);waitFor(()=>state(dir).status==='failed','code rejection');assert.equal(report(dir).gates[0].exit,1);assert.equal(existsSync(join(dir,'.orchestra/workflows/bad')),false);
-    const other=project(),good=join(other,'good-pack.json');writeFileSync(good,JSON.stringify({name:'declined',files:{'workflow.json':JSON.stringify({workflow:1,budget:{calls:1},steps:[{id:'ask',ask:{questions:['Choose?']}}]})}}));
+    const other=project(),good=join(other,'good-pack.json');writeFileSync(good,JSON.stringify({name:'declined',files:{'workflow.json':JSON.stringify({workflow:2,description:'Asks a question. Give a topic. Returns your choice.',budget:{calls:1},steps:[{id:'ask',ask:{questions:['Choose?']}}]})}}));
     orch(other,['run','new-workflow','draft this','--detach'],{MOCK_PACK_FILE:good});waitFor(()=>state(other).status==='awaiting_user','description');orch(other,['answer','Build it.']);waitFor(()=>state(other).questions?.origin==='approve','declined approval');orch(other,['answer','decline']);waitFor(()=>state(other).status==='completed','decline');assert.equal(existsSync(join(other,'.orchestra/workflows/declined')),false);
+  }
+});
+Object.assign(tests, {
+  'workflows: v2 requires a description while v1 packs still load'() {
+    const dir=project(),steps=[{id:'ask',ask:{questions:['Choose?']}}];
+    const write=(name,w)=>{const f=join(dir,'.orchestra/workflows',name);mkdirSync(f,{recursive:true});writeFileSync(join(f,'workflow.json'),JSON.stringify(w));orch(dir,['workflow','diagram',name]);return join(f,'workflow.json');};
+    assert.match(orch(dir,['workflow','check',write('old',{workflow:1,budget:{calls:1},steps})]),/valid/);
+    assert.match(orch(dir,['workflow','check',write('new',{workflow:2,description:'Asks. Give a topic. Returns a choice.',budget:{calls:1},steps})]),/valid/);
+    for(const [name,w] of [['blank',{workflow:2,description:' ',budget:{calls:1},steps}],['none',{workflow:2,budget:{calls:1},steps}]]) {
+      const file=join(dir,name+'.json');writeFileSync(file,JSON.stringify(w));
+      const result=orchRaw(dir,['workflow','check',file]);assert.equal(result.code,1);assert.match(result.err,/requires a description/);
+    }
+    const v1=join(dir,'v1-described.json');writeFileSync(v1,JSON.stringify({workflow:1,description:'x',budget:{calls:1},steps}));
+    assert.match(orchRaw(dir,['workflow','check',v1]).err,/unknown workflow field/);
+    const v3=join(dir,'v3.json');writeFileSync(v3,JSON.stringify({workflow:3,description:'x',budget:{calls:1},steps}));
+    assert.equal(orchRaw(dir,['workflow','check',v3]).code,1);
+  },
+  'workflows: list shows each name once in search order with its source and description'() {
+    const dir=project(),steps=[{id:'ask',ask:{questions:['Choose?']}}];
+    const write=(name,w)=>{const f=join(dir,'.orchestra/workflows',name);mkdirSync(f,{recursive:true});writeFileSync(join(f,'workflow.json'),typeof w==='string'?w:JSON.stringify(w));};
+    write('old',{workflow:1,budget:{calls:1},steps});write('broken','{');
+    const builtin=readdirSync(join(REPO,'workflows')).filter(n=>existsSync(join(REPO,'workflows',n,'workflow.json')));
+    write(builtin[0],{workflow:2,description:'Project override.',budget:{calls:1},steps});
+    const list=JSON.parse(orch(dir,['workflow','list','--json'])),by=Object.fromEntries(list.map(p=>[p.name,p]));
+    assert.equal(list.length,new Set(list.map(p=>p.name)).size);
+    assert.equal(by[builtin[0]].source,'project');assert.equal(by[builtin[0]].description,'Project override.');
+    assert.equal(by.old.description,null);assert.equal(by.old.guide,null);assert.equal(by.old.version,1);assert.ok(by.broken.error);
+    for(const name of builtin.slice(1)){assert.equal(by[name].source,'built-in');assert.ok(by[name].description.trim(),name);assert.equal(by[name].version,2);assert.ok(existsSync(by[name].guide),name);}
+    const text=orch(dir,['workflow','list']);assert.match(text,/no description \(workflow v1\)/);assert.match(text,/invalid: /);assert.match(text,/Project override\./);
+    assert.equal(orchRaw(dir,['workflow','list','extra']).code,1);
+  },
+  'step 6: a draft without a description is rejected and not saved'() {
+    const dir=project(),pack=join(dir,'v1-pack.json');
+    writeFileSync(pack,JSON.stringify({name:'undescribed',files:{'workflow.json':JSON.stringify({workflow:1,budget:{calls:1},steps:[{id:'ask',ask:{questions:['Choose?']}}]})}}));
+    orch(dir,['run','new-workflow','draft this','--detach'],{MOCK_PACK_FILE:pack});waitFor(()=>state(dir).status==='awaiting_user','description');
+    assert.match(state(dir).questions.items[0].question,/description of the workflow is required/);
+    orch(dir,['answer','Build it.']);waitFor(()=>state(dir).status==='failed','description rejection');
+    assert.equal(report(dir).gates[0].exit,1);assert.equal(existsSync(join(dir,'.orchestra/workflows/undescribed')),false);
   }
 });
 Object.assign(tests, {
@@ -582,14 +620,15 @@ Object.assign(tests, {
     const clis=[...new Set([...readdirSync(join(REPO,'orchestra/adapters')).map(n=>n.replace(/\.[^.]+$/,'')),
       'antigravity','gemini','aider','cline','copilot','cursor','grok','kimi','opencode','qoder','warp','vibe','zcode','commandcode','muse','omp'])];
     const names=readdirSync(join(REPO,'workflows')).filter(n=>n!=='_shared');
-    const forbidden=(text)=>{
-      // "code" is also an exit-code property and the public lesson scope; those uses are not workflow names.
-      text=text.replace(/\['project','code'\]/g,"[]");
-      return [...clis,...names.filter(n=>n!=='code')].some(n=>new RegExp(`\\b${n}\\b`,'i').test(text)) ||
-        /["'`]code["'`]|\bcode\s+workflow\b|\bworkflow\s+code\b/i.test(text);
-    };
+    // "code" is also an exit-code property and the public lesson scope; those uses are not workflow names.
+    const plain=(text)=>text.replace(/\['project','code'\]/g,"[]").replace(/`project` and `code` lessons/g,'');
+    // Docs may name the shipped adapters, but everything about one workflow lives in its pack.
+    const namesWorkflow=(text)=>names.filter(n=>n!=='code').some(n=>new RegExp(`\\b${n}\\b`,'i').test(plain(text))) ||
+      /["'`]code["'`]|\bcode\s+workflow\b|\bworkflow\s+code\b/i.test(plain(text));
+    const forbidden=(text)=>clis.some(n=>new RegExp(`\\b${n}\\b`,'i').test(plain(text))) || namesWorkflow(text);
     for(const path of [...walk(join(REPO,'orchestra/lib')),...walk(join(REPO,'orchestra/bin'))])assert.equal(forbidden(readFileSync(path,'utf8')),false,path);
     assert.equal(forbidden(readFileSync(join(REPO,'CONSTITUTION.md'),'utf8')),false);
+    for(const doc of ['skills/orchestra/SKILL.md','README.md','docs/workflows.md'])assert.equal(namesWorkflow(readFileSync(join(REPO,doc),'utf8')),false,`${doc} names no workflow`);
     for(const name of [...clis,...names])assert.equal(forbidden(`const workflow = '${name}';`),true,name);
   },
   'promise 1: ad-hoc lanes plan and batch phase briefs without built-ins'() {
