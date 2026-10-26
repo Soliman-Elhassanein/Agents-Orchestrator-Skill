@@ -562,6 +562,50 @@ Object.assign(tests, {
     const final=readFileSync(join(dir,'.orchestra/runs',s.id,'FINAL.md'),'utf8');
     assert.match(final,/^Execution completed\./);assert.match(final,/Result of step task:\nresponse from medium/);
   },
+  'new-workflow: interviews until understood, then drafts, draws and saves only on exact approval'() {
+    const packFile=(dir,name)=>{const f=join(dir,`${name}.json`);writeFileSync(f,JSON.stringify({name,files:{
+      'workflow.json':JSON.stringify({workflow:3,description:'Reviews a change. Give it: orchestra run x "y". Returns feedback.',budget:{calls:4},steps:[
+        {id:'triage',agent:{prompt:'triage.md',tier:1,choices:{field:'kind',values:['small','large']}}},
+        {id:'review',when:{step:'triage',field:'kind',equals:'large'},parallel:{prompt:'triage.md',count:2}}]}),
+      'triage.md':'ORCHESTRA ROLE: triage\nCYCLE: 1\nClassify the change.'}}));return f;};
+    const runDir=(dir)=>join(dir,'.orchestra/runs',state(dir).id);
+    const dir=project();
+    orch(dir,['run','new-workflow','review each change','--detach'],{MOCK_PACK_FILE:packFile(dir,'approved'),MOCK_CHOICE:'understood=yes;next=finish'});
+    waitFor(()=>state(dir).questions?.origin==='build/0/approve','approval question');
+    assert.deepEqual(report(dir).calls.map(c=>c.purpose ?? c.step),['understand/0/interview','understand/0/gaps/0','understand/0/gaps/1','synthesis','understand/0/confirm','build/0/draft']);
+    const outline=readFileSync(join(runDir(dir),'workflows/outline.txt'),'utf8');
+    assert.match(outline,/1\. triage · agent — tier: 1 · access: read; chooses kind: small \| large/);assert.match(outline,/only when triage.kind = "large"/);
+    assert.ok(existsSync(join(runDir(dir),'workflows/workflow.drawio')));assert.equal(existsSync(join(dir,'.orchestra/workflows/approved')),false);
+    orch(dir,['answer','approve project']);waitFor(()=>state(dir).status==='completed','saved');
+    assert.ok(existsSync(join(dir,'.orchestra/workflows/approved/workflow.drawio')));assert.match(orch(dir,['workflow','check',join(dir,'.orchestra/workflows/approved/workflow.json')]),/valid/);
+    assert.equal(report(dir).tokens.calls,7);
+    const declined=project();
+    orch(declined,['run','new-workflow','review each change','--detach'],{MOCK_PACK_FILE:packFile(declined,'declined'),MOCK_CHOICE:'understood=yes;next=finish'});
+    waitFor(()=>state(declined).questions?.origin==='build/0/approve','declined approval');orch(declined,['answer','decline']);
+    waitFor(()=>state(declined).status==='completed','declined');assert.equal(existsSync(join(declined,'.orchestra/workflows/declined')),false);
+    const revised=project();
+    orch(revised,['run','new-workflow','review each change','--detach'],{MOCK_PACK_FILE:packFile(revised,'revised'),MOCK_CHOICE:'understood=yes;next=revise,finish'});
+    waitFor(()=>state(revised).questions?.origin==='build/0/approve','first draft');orch(revised,['answer','Add a gate that runs the tests.']);
+    waitFor(()=>state(revised).questions?.origin==='build/1/approve','second draft');
+    assert.match(readFileSync(join(runDir(revised),report(revised).calls.find(c=>c.step==='build/1/draft').log,'brief.md'),'utf8'),/Add a gate that runs the tests/);
+    orch(revised,['answer','approve user']);waitFor(()=>state(revised).status==='completed','saved for the user');
+    assert.ok(existsSync(join(process.env.HOME,'.config/orchestra/workflows/revised/workflow.json')));assert.equal(report(revised).tokens.calls,9);
+  },
+  'init: creates the repository and a first commit with only .gitignore; worktrees live in .orchestra'() {
+    const fresh=mkdtempSync(join(tmpdir(),'orchestra-e2e-'));tmpRoots.push(fresh);writeFileSync(join(fresh,'notes.md'),'mine\n');
+    const config=join(fresh,'..',`${basename(fresh)}.gitconfig`);tmpRoots.push(config);writeFileSync(config,'[user]\n\tname = Test\n\temail = test@example.com\n');
+    const id={GIT_CONFIG_GLOBAL:config};
+    assert.match(sh(fresh,process.execPath,[SOURCE_BIN,'init'],id),/Created a Git repository[\s\S]*Made a first commit/);
+    assert.equal(sh(fresh,'git',['log','--format=%s'],id).trim(),"chore: Ignore Orchestra's local files");
+    assert.equal(sh(fresh,'git',['ls-files']).trim(),'.gitignore');assert.match(readFileSync(join(fresh,'.gitignore'),'utf8'),/^\/\.orchestra\/$/m);
+    assert.match(sh(fresh,'git',['status','--porcelain']),/notes\.md/,'the user\'s own files stay uncommitted');
+    const dir=project();orch(dir,['run','solo','slow job','--detach'],{MOCK_DELAY:'1500'});
+    const run=waitFor(()=>{const s=state(dir);return s.status==='running' && existsSync(join(dir,'.orchestra/worktrees',s.id,'run')) && s.id;},'worktree in .orchestra');
+    assert.equal(sh(dir,'git',['status','--porcelain']).trim(),'','worktrees are ignored');
+    waitFor(()=>state(dir).status==='completed','completion');
+    assert.equal(existsSync(join(dir,'.orchestra/worktrees',run)),false);assert.equal(existsSync(join(dir,'.git/orchestra-worktrees')),false);
+    assert.match(orch(dir,['workflow','diagram','new-workflow','--text']),/^Workflow · budget: 40 calls\n1\. understand · loop/);
+  },
   'parallel: anonymized peers see labels instead of agent names'() {
     const dir=project({agents:{a:{cli:'mock',model:'first',tier:3},b:{cli:'second',model:'second',tier:3}}});
     cpSync(join(dir,'.orchestra/adapters/mock.json'),join(dir,'.orchestra/adapters/second.json'));

@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, openSync, closeSync, readFileSync, writeFileSync, readdirSync, renameSync } from 'node:fs';
+import { existsSync, mkdirSync, openSync, closeSync, readFileSync, writeFileSync, readdirSync, renameSync, rmSync } from 'node:fs';
 import { join, resolve, relative, isAbsolute } from 'node:path';
 import * as g from './git.mjs';
 import { loadConfig, parseDuration } from './config.mjs';
@@ -375,7 +375,7 @@ class Runtime {
     const file=resolve(this.interpolate(b.outputFile.path));
     if(!file.startsWith(this.run.dir+'/'))throw new Error('outputFile must be inside the run folder');
     const value=get(output,b.outputFile.field);if(typeof value!=='string')throw new Error('outputFile field must contain text');
-    mkdirSync(resolve(file,'..'),{recursive:true});if(!existsSync(file))writeFileSync(file,value);output.taskFile=file;
+    mkdirSync(resolve(file,'..'),{recursive:true});writeFileSync(file,value);output.taskFile=file;
   }
   trackWriters(kind,b,key,e) {
     if(kind==='agent' && b.access==='write' && !e.output?.skipped)this.lastWriters=[{b,key}];
@@ -432,7 +432,7 @@ class Runtime {
     this.onSignal=()=>{this.stopping=true;stopAllAgents();if(this.gateChild){try{process.kill(-this.gateChild.pid,'SIGTERM');}catch{}}};
     process.on('SIGTERM',this.onSignal);process.on('SIGINT',this.onSignal);
     try {
-      if(existsSync(this.wtRoot))for(const d of readdirSync(this.wtRoot))g.removeWorktree(this.root,join(this.wtRoot,d));
+      for(const dir of [this.wtRoot,g.legacyWorktreesRoot(this.root,this.run.id)])if(existsSync(dir))for(const d of readdirSync(dir))g.removeWorktree(this.root,join(dir,d));
       if(resume) {
         for(const call of [...this.s.calls,...Object.values(this.s.steps).flatMap((e)=>e.attempts ?? []),...this.s.gates])if(call.status==='running')call.status='interrupted';
         g.addExistingBranchWorktree(this.root,this.wt,this.s.branch);this.s.finishedAt=undefined;this.s.error=undefined;}
@@ -456,7 +456,7 @@ class Runtime {
       const result=last===undefined?'':`\n\nResult of step ${this.previous}:\n${text.length>8000?text.slice(0,8000)+'\n… (full output in run.json)':text}`;
       this.save();writeFileSync(this.run.path('FINAL.md'),this.s.final+result+'\n');
       process.off('SIGTERM',this.onSignal);process.off('SIGINT',this.onSignal);
-      if(existsSync(this.wtRoot))for(const d of readdirSync(this.wtRoot))g.removeWorktree(this.root,join(this.wtRoot,d));
+      if(existsSync(this.wtRoot)){for(const d of readdirSync(this.wtRoot))g.removeWorktree(this.root,join(this.wtRoot,d));rmSync(this.wtRoot,{recursive:true,force:true});}
       if(this.s.status==='completed')for(const sep of ['.','-'])for(const branch of g.branchesWithPrefix(this.root,this.s.branch+sep))g.deleteBranch(this.root,branch);
       notify('Orchestra',this.s.final);
     }

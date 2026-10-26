@@ -78,6 +78,27 @@ export function workflowDiagram(data) {
   return `<?xml version="1.0" encoding="UTF-8"?>\n<mxfile><diagram id="workflow" name="Workflow"><mxGraphModel grid="1" gridSize="10" page="0" pageWidth="${width}" pageHeight="${y+80}"><root>\n${cells.map((c)=>'  '+c).join('\n')}\n</root></mxGraphModel></diagram></mxfile>\n`;
 }
 
+/** A plain-text outline of the same graph, for reading in a terminal or chat. Pure, like the drawing. */
+export function workflowOutline(data) {
+  const workflow=normalizeWorkflow(data), lines=[`Workflow · budget: ${workflow.budget.calls} calls`];
+  const walk=(steps,indent)=>steps.forEach((step,i)=>{
+    const kind=kindOf(step), b=step[kind], pad=' '.repeat(indent), at=`${pad}${i+1}. ${step.id} · ${kind}`;
+    const parts=[];
+    if(kind==='agent' || kind==='parallel')parts.push(selection(b));
+    if(kind==='parallel')parts.push(`${b.count ?? 2} independent agents${b.distinct ? ' from different vendors' : ''}, then a synthesis`);
+    if(b.choices)parts.push(`chooses ${b.choices.field}: ${b.choices.values.join(' | ')}`);
+    if(kind==='ask')parts.push('waits for your answer');
+    if(kind==='gate')parts.push(`runs: ${b.command}`);
+    if(kind==='tasks')parts.push('runs a task list on task branches, merges, runs gates');
+    if(kind==='loop')parts.push(`repeats until ${b.until.step}.${b.until.field} = ${JSON.stringify(b.until.equals)}, at most ${b.max} times`);
+    if(step.when)parts.push(`only when ${step.when.step}.${step.when.field} = ${JSON.stringify(step.when.equals)}`);
+    lines.push(`${at}${parts.length ? ` — ${parts.join('; ')}` : ''}`);
+    if(kind==='loop')walk(b.steps,indent+3);
+  });
+  walk(workflow.steps,0);
+  return lines.join('\n')+'\n';
+}
+
 export function writeWorkflowDiagram(file,out=join(dirname(file),'workflow.drawio')) {
   writeFileSync(out,workflowDiagram(JSON.parse(readFileSync(file,'utf8'))));
   return out;

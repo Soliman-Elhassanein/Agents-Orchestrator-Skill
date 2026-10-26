@@ -77,10 +77,15 @@ export function commitAll(cwd, message) {
 }
 
 /**
- * Where a run's worktrees live: inside the repository's git directory, so the user's tools (test
- * runners, linters, file watchers) never pick them up from the checkout.
+ * Where a run's worktrees live: `.orchestra/worktrees/<run-id>/`, one folder per executor, inside the
+ * checkout but ignored by Git with the rest of `.orchestra/`.
  */
 export function worktreesRoot(repo, runId) {
+  return join(repo, ".orchestra", "worktrees", runId);
+}
+
+/** Where runs before version 3 kept their worktrees, so a resumed run can clear them. */
+export function legacyWorktreesRoot(repo, runId) {
   const common = git(repo, ["rev-parse", "--git-common-dir"]).out;
   return join(isAbsolute(common) ? common : join(repo, common), "orchestra-worktrees", runId);
 }

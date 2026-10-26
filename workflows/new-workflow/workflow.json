@@ -1,0 +1,126 @@
+{
+  "workflow": 3,
+  "description": "Builds a new workflow with you. A strong agent interviews you and two independent reviewers look for gaps until the use case is clear, including whether the path is fixed or an agent chooses at named points. Then it drafts the pack, checks it, draws it and simulates it, and saves it only after you approve. Give the job: orchestra run new-workflow \"Review each pull request with two reviewers and summarize their feedback\". Returns the saved pack with its diagram, or nothing if you decline.",
+  "budget": {
+    "calls": 40
+  },
+  "steps": [
+    {
+      "id": "understand",
+      "loop": {
+        "max": 3,
+        "until": {
+          "step": "confirm",
+          "field": "understood",
+          "equals": "yes"
+        },
+        "steps": [
+          {
+            "id": "interview",
+            "agent": {
+              "prompt": "interview.md",
+              "tier": 3,
+              "access": "read",
+              "sees": ["confirm", "gaps"]
+            }
+          },
+          {
+            "id": "gaps",
+            "parallel": {
+              "prompt": "gaps.md",
+              "tier": 2,
+              "access": "read",
+              "count": 2,
+              "distinct": "vendor",
+              "sees": ["interview"]
+            }
+          },
+          {
+            "id": "confirm",
+            "agent": {
+              "prompt": "confirm.md",
+              "tier": 3,
+              "access": "read",
+              "sees": ["interview", "gaps"],
+              "choices": {
+                "field": "understood",
+                "values": ["yes", "no"]
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "build",
+      "loop": {
+        "max": 3,
+        "until": {
+          "step": "decide",
+          "field": "next",
+          "equals": "finish"
+        },
+        "steps": [
+          {
+            "id": "draft",
+            "agent": {
+              "prompt": "draft.md",
+              "tier": 3,
+              "access": "read",
+              "sees": ["interview", "confirm", "draft"],
+              "outputFile": {
+                "field": "pack",
+                "path": "{{runDir}}/workflows/draft.json"
+              }
+            }
+          },
+          {
+            "id": "check",
+            "gate": {
+              "command": "node \"{{workflowDir}}/scripts/manage.mjs\" check \"{{runDir}}\" \"{{engineDir}}\" \"{{projectRoot}}\""
+            }
+          },
+          {
+            "id": "diagram",
+            "gate": {
+              "command": "node \"{{workflowDir}}/scripts/manage.mjs\" diagram \"{{runDir}}\" \"{{engineDir}}\" \"{{projectRoot}}\""
+            }
+          },
+          {
+            "id": "dry",
+            "gate": {
+              "command": "node \"{{workflowDir}}/scripts/manage.mjs\" dry \"{{runDir}}\" \"{{engineDir}}\" \"{{projectRoot}}\""
+            }
+          },
+          {
+            "id": "approve",
+            "ask": {
+              "questions": [
+                "Read the workflow's outline in {{runDir}}/workflows/outline.txt, or open {{runDir}}/workflows/workflow.drawio in draw.io or the Draw.io extension in VS Code. Reply exactly approve project or approve user to save it, decline to stop without saving, or say what to change."
+              ]
+            }
+          },
+          {
+            "id": "decide",
+            "agent": {
+              "prompt": "decide.md",
+              "tier": 1,
+              "access": "read",
+              "sees": ["approve"],
+              "choices": {
+                "field": "next",
+                "values": ["finish", "revise"]
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "save",
+      "gate": {
+        "command": "node \"{{workflowDir}}/scripts/manage.mjs\" save \"{{runDir}}\" \"{{engineDir}}\" \"{{projectRoot}}\""
+      }
+    }
+  ]
+}

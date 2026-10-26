@@ -50,8 +50,9 @@ Workflows
   data files + prompts + optional gate scripts
 ```
 
-Every run is a workflow. Orchestra ships one built-in workflow, a single agent doing the
-task; you write any others as data files.
+Every run is a workflow. Orchestra ships two built-in workflows: one has a single agent do
+the task, the other builds new workflows with you by interviewing you until your use case is
+clear. Any others you write, or build with it, as data files.
 
 Workflows describe themselves. `orchestra workflow list` shows every workflow available to
 you, built in, installed for your user or in your project, with what it does, what to give
@@ -122,6 +123,10 @@ cd /path/to/your/project
 orchestra init
 ```
 
+`init` makes the folder a Git repository if it isn't one, adds `/.orchestra/` to
+`.gitignore`, and makes a first commit holding only `.gitignore` when the repository has no
+commits yet. Commit your own files before running: runs start from committed work.
+
 Edit `.orchestra/config.json`. Keep its other settings and choose model names, effort levels
 and tiers that your accounts support. Detected models and tiers are suggestions.
 For the examples below, configure a cheap entry at tier 1, a working entry at tier 2 and a
@@ -178,7 +183,9 @@ Name an **existing target branch** explicitly, including when it is the default 
 Landing requires a completed run and a clean checkout. It switches to the target branch and
 merges the run branch. It never pushes.
 
-Runs use separate branches and worktrees; your checkout stays untouched until landing.
+Runs use separate branches and worktrees; your checkout stays untouched until landing. Each
+executor (the run itself, each parallel agent, each task, each gate) gets its own folder in
+`.orchestra/worktrees/<run-id>/`, which Git ignores; the folder is removed when the run ends.
 By default, later queued runs build on the last completed run before landing, so a later
 run includes the earlier task's changes. Inspect both before keeping them.
 
@@ -404,12 +411,16 @@ This makes one short real call. Adding a CLI needs no change to Orchestra's core
 
 A workflow pack is a named folder containing `workflow.json`, prompts and optional gate
 scripts. Each includes a generated `workflow.drawio` that opens in draw.io; regenerate it with
-`orchestra workflow diagram <name|path-to-workflow.json>` after changing the JSON. Every pack
+`orchestra workflow diagram <name|path-to-workflow.json>` after changing the JSON, and print
+a text outline with `--text`. Every pack
 has a required `description` saying what it does, what to give it and what it returns;
 `orchestra workflow list` shows each available workflow with its description.
 [Workflow format v3](docs/workflows.md) documents the six blocks, routing and annotated
 examples. Put cheap bulk calls at tier 1, strong proposals at tier 3, a finite call budget
-on every workflow and a maximum on every loop. Keep workflow files as data.
+on every workflow and a maximum on every loop. Keep workflow files as data. Read
+[Designing a workflow](docs/workflows.md#designing-a-workflow) first: when to use one agent,
+fixed or agent-chosen paths, and which block fits which pattern. The built-in workflow that
+builds workflows follows the same guide; `orchestra workflow list` shows its name.
 
 ```sh
 orchestra workflow diagram ./my-workflow/workflow.json
@@ -434,7 +445,7 @@ init [--force]
 run <workflow> [<task>] [--task-file <file>] [--gate <cmd>]
     [--detach|--foreground] [--every <minutes>] [--stuck-after <minutes>]
 adapter test <name>
-workflow list [--json] | check <file> | diagram <name|file> [--out <file>] | run <name> --dry | add <git-url|path> [--user]
+workflow list [--json] | check <file> | diagram <name|file> [--out <file>|--text] | run <name> --dry | add <git-url|path> [--user]
 queue [add <workflow> <task> | edit <id> <task> | rm <id> | move <id> <position> | hold | resume]
 status [run-id] [--json]        list
 answer [run-id] "1. … 2. …" | answer [run-id] --file <file>

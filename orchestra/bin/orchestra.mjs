@@ -6,7 +6,7 @@
  * status [id] [--json] | list | check [--json] | watch | quota [--no-refresh] [--json]
  * run / watch: [--every <minutes>] [--stuck-after <minutes>] — run watches unless detached or foreground
  * queue [add <workflow> <task>|edit|rm|move|hold|resume] | adapter test <name>
- * workflow list [--json] | check <file> | diagram <name|file> [--out <file>] | run <name> --dry | add <path|git-url> [--user]
+ * workflow list [--json] | check <file> | diagram <name|file> [--out <file>|--text] | run <name> --dry | add <path|git-url> [--user]
  * knowledge [add <text>|approve <id>|rm <id>] [--cli <name>] [--json] | land [id] <target-branch> | doctor
  */
 import { spawn, spawnSync } from "node:child_process";
@@ -18,7 +18,7 @@ import { loadConfig } from "../lib/config.mjs";
 import * as g from "../lib/git.mjs";
 import * as queue from "../lib/queue.mjs";
 import { listWorkflows, loadWorkflow, workflowFile, builtinWorkflows, checkWorkflow, dryWorkflow, addWorkflow } from "../lib/workflows.mjs";
-import { writeWorkflowDiagram } from "../tools/diagram.mjs";
+import { workflowOutline, writeWorkflowDiagram } from "../tools/diagram.mjs";
 import { runLoop } from "../lib/runner.mjs";
 import { childEnv } from "../lib/util.mjs";
 import { RunState, latestRunId, listRuns, newRunId, oneLine } from "../lib/state.mjs";
@@ -86,8 +86,13 @@ const guard = (fn) => {
 // ── init ────────────────────────────────────────────────────────────────────
 
 function cmdInit(args) {
-  const root = g.repoRoot(process.cwd());
-  if (!root) die("not a git repository — run git init and make a first commit first");
+  let root = g.repoRoot(process.cwd());
+  if (!root) {
+    // A folder that is not a Git repository yet becomes one: runs branch from its history.
+    g.git(process.cwd(), ["init", "-q"]);
+    root = g.repoRoot(process.cwd());
+    console.log(`Created a Git repository in ${root}.`);
+  }
   const orch = join(root, ".orchestra");
   const engine = join(orch, "engine");
   mkdirSync(orch, { recursive: true });
@@ -112,6 +117,13 @@ function cmdInit(args) {
   const ignore = join(root, ".gitignore");
   const current = existsSync(ignore) ? readFileSync(ignore, "utf8") : "";
   if (!current.split("\n").includes("/.orchestra/")) writeFileSync(ignore, `${current}${current.endsWith("\n") || !current ? "" : "\n"}/.orchestra/\n`);
+  // A repository without commits gets one holding only .gitignore; the user's files stay theirs to commit.
+  if (!g.git(root, ["rev-parse", "--verify", "HEAD"], { allowFail: true }).ok) {
+    g.git(root, ["add", ".gitignore"]);
+    const first = g.git(root, ["commit", "-q", "-m", "chore: Ignore Orchestra's local files"], { allowFail: true });
+    console.log(first.ok ? "Made a first commit with .gitignore. Commit your project files before running: runs start from committed work."
+      : "Could not make a first commit; fix: set git config user.name and user.email, then commit your files.");
+  }
   console.log("Orchestra installed. Edit .orchestra/config.json: detected agents have editable tier suggestions. Then run orchestra doctor.");
 }
 
@@ -711,8 +723,12 @@ try { switch (command) {
       else for(const p of packs)console.log(`${p.name}  (${p.source})\n  ${p.error?`invalid: ${p.error}`:p.description ?? 'no description (workflow v1)'}${p.guide?`\n  Guide: ${p.guide}`:''}`);
       break;
     }
-    if(!value)die('workflow list [--json] | check <file> | diagram <name|file> [--out <file>] | run <name> --dry | add <path|git-url> [--user]');
-    if(sub==='diagram' && (!flags.length || flags.length===2 && flags[0]==='--out')){const file=existsSync(resolve(value))?resolve(value):workflowFile(g.repoRoot(process.cwd()) ?? process.cwd(),value);checkWorkflow(file,false);console.log(writeWorkflowDiagram(file,flags[1]?resolve(flags[1]):undefined));}
+    if(!value)die('workflow list [--json] | check <file> | diagram <name|file> [--out <file>|--text] | run <name> --dry | add <path|git-url> [--user]');
+    if(sub==='diagram' && (!flags.length || flags.length===2 && flags[0]==='--out' || flags.length===1 && flags[0]==='--text')){
+      const file=existsSync(resolve(value))?resolve(value):workflowFile(g.repoRoot(process.cwd()) ?? process.cwd(),value);checkWorkflow(file,false);
+      // --text prints the outline for a terminal or chat; otherwise write the draw.io file.
+      if(flags[0]==='--text')process.stdout.write(workflowOutline(JSON.parse(readFileSync(file,'utf8'))));
+      else console.log(writeWorkflowDiagram(file,flags[1]?resolve(flags[1]):undefined));}
     else if(sub==='check' && !flags.length){checkWorkflow(resolve(value));console.log('Workflow valid.');}
     else if(sub==='run' && flags.join(' ')==='--dry')dryWorkflow(loadWorkflow(g.repoRoot(process.cwd()) ?? process.cwd(),value));
     else if(sub==='add' && flags.every((f)=>f==='--user'))console.log(`Installed: ${addWorkflow(flags.includes('--user')?process.cwd():findProjectRoot(),value,flags.includes('--user')).join(', ')}`);

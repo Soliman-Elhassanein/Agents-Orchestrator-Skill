@@ -26,9 +26,12 @@ if(role==='diagnosis')output={text:`Revised brief.\nSUBTASK:\n${title}\nPrevious
 if(role==='synthesis')output={text:'Agreement and disagreement with reasons; options and open questions.',agreement:['shared points'],disagreement:[],options:[],openQuestions:[]};
 if(role==='workflow-author' && env.MOCK_PACK_FILE)output={pack:readFileSync(env.MOCK_PACK_FILE,'utf8')};
 if(env.MOCK_CHOICE && !['plan','brief','diagnosis','synthesis'].includes(role)) {
-  // field=value, or field=first,second to choose by loop cycle.
-  const [field,value]=env.MOCK_CHOICE.split('='),cycle=Number(/CYCLE: (\d+)/.exec(brief)?.[1] ?? 1);
-  output[field]=env.MOCK_CHOICE_FIRST && !brief.includes('Previous attempt')?env.MOCK_CHOICE_FIRST:value.split(',')[Math.min(cycle,value.split(',').length)-1];
+  // field=value;other=value, where value may be first,second to choose by loop cycle.
+  const cycle=Number(/CYCLE: (\d+)/.exec(brief)?.[1] ?? 1);
+  for(const pair of env.MOCK_CHOICE.split(';')) {
+    const [field,value]=pair.split('='),values=value.split(',');
+    output[field]=env.MOCK_CHOICE_FIRST && !brief.includes('Previous attempt')?env.MOCK_CHOICE_FIRST:values[Math.min(cycle,values.length)-1];
+  }
 }
 if(env.MOCK_STOP_CYCLE)output.stop=Number(/CYCLE: (\d+)/.exec(brief)?.[1] ?? 1)>=Number(env.MOCK_STOP_CYCLE);
 if(env.MOCK_LESSONS)output.lessons=JSON.parse(env.MOCK_LESSONS);

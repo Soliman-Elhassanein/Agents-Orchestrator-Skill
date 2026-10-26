@@ -69,7 +69,9 @@ the step part includes the iteration (`….rounds.0.propose.agent-1`). They are 
 the run completes. Runs recorded before version 3 keep their earlier branch names, and a
 checkpoint's `lanes` field is read as `branches`.
 
-Worktrees live under Git's common directory. Unfinished task branches survive stopping,
+Worktrees live in `.orchestra/worktrees/<run-id>/`, one folder per executor; runs before
+version 3 used `.git/orchestra-worktrees/` and a resumed run clears those. The run's folder
+is removed when it ends. Unfinished task branches survive stopping,
 failure and crashes. Resume reattaches those branches and skips completed step checkpoints.
 A merge recorded by Git just before a crash is recognized by ancestry on resume.
 

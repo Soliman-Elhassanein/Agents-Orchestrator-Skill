@@ -12,8 +12,9 @@ research, review or deliberation.
 
 **How it is used:** you talk to your own agent CLI, the communicator. It picks a workflow,
 starts it with Orchestra and relays Orchestra's questions to you. Every run is a workflow:
-the engine takes a workflow and a task, nothing else. Orchestra ships one built-in workflow,
-a single agent doing the task; every other workflow is written by its user.
+the engine takes a workflow and a task, nothing else. Orchestra ships two built-in
+workflows: a single agent doing the task, and one that builds new workflows with the user.
+Every other workflow is written by its user.
 
 Five promises define Orchestra. Every change must keep all five.
 
@@ -72,4 +73,4 @@ breaking any promise.
 Procedures belong in workflow files; reusable guarantees belong in the six blocks.
 Amend this constitution explicitly before changing the product's direction.
 
-**Version**: 2.0.0 | **Ratified**: 2026-10-20 | **Last amended**: 2026-10-26
+**Version**: 2.1.0 | **Ratified**: 2026-10-20 | **Last amended**: 2026-10-26

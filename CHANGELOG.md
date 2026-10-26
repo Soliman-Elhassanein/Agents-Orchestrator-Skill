@@ -7,9 +7,13 @@ Breaking changes:
 - Every run is a workflow. `orchestra run <workflow> "<task>"` and
   `orchestra queue add <workflow> <task>` name one; `--tier` and `--access`, which only
   applied to runs without a workflow, are removed.
-- Orchestra ships one built-in workflow, `solo`: a single agent does the task. The `code`,
-  `council` (and its modes) and `new-workflow` built-ins are removed; they remain in the
-  `archive/pre-langgraph` tag. Write your own workflows as data packs.
+- Orchestra ships two built-in workflows. `solo`: a single agent does the task.
+  `new-workflow`, rebuilt for format 3: a tier-3 interviewer and two independent reviewers
+  question you until the use case is clear, including whether the path is fixed or an agent
+  chooses at named points; then it drafts, checks, draws (draw.io and a text outline),
+  dry-runs, lets you ask for changes, and saves only on an exact approval. The `code` and
+  `council` built-ins (with its modes) are removed; they remain in the
+  `archive/pre-langgraph` tag.
 - Node 20 or newer. LangGraph (`@langchain/langgraph` 1.4.21 with `@langchain/core` 1.2.17)
   is the one dependency, pinned exactly. `orchestra init` links the project's engine copy to
   it; run `init` again after updating Orchestra.
@@ -34,6 +38,16 @@ Changes:
   `orchestra/<run-id>.<step>.T001-first-words-of-the-task` and parallel children
   `orchestra/<run-id>.<step>.agent-1`. Checkpoints record task branches under `branches`;
   runs started before this version resume with their old names.
+- Worktrees live in `.orchestra/worktrees/<run-id>/`, one folder per executor, removed when
+  the run ends; resumed older runs clear `.git/orchestra-worktrees/`.
+- `orchestra init` creates the Git repository when the folder has none, and makes a first
+  commit holding only `.gitignore` when there are no commits.
+- `orchestra workflow diagram <name> --text` prints a workflow as a text outline.
+- `docs/workflows.md` gains "Designing a workflow", drawn from Microsoft's agent
+  orchestration, behavior engineering and agents-at-scale guidance.
+- `outputFile` rewrites its file each time the step completes, so a revised step's output
+  replaces the earlier one.
+- Constitution 2.1.0: two built-in workflows.
 - `FINAL.md` ends with the last step's result (its text, or its output as JSON), and the
   skill relays it to the user.
 - The README explains day-to-day use through your agent CLI, reading a run's result, and

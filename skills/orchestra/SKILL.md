@@ -11,15 +11,20 @@ see every workflow in search order with its description: what it does, what to g
 what it returns. Judge fit from the description, and read the guide it lists for how a full run goes; a
 workflow without a description (format v1) needs its prompts read. When showing a workflow to the user, point to its `workflow.drawio` so they
 can open it in draw.io or the Draw.io extension in VS Code. Regenerate it from workflow.json
-with `orchestra workflow diagram <name>` if missing or stale; never edit it by hand. A workflow fits: run it. None fits: run the built-in workflow
-whose description says a single agent does the task. If the job seems
+with `orchestra workflow diagram <name>` if missing or stale; never edit it by hand. To show a
+workflow in the chat, print `orchestra workflow diagram <name> --text` and paste its outline.
+A workflow fits: run it. None fits: run the built-in workflow whose description says a single
+agent does the task. When the user wants a new repeatable workflow, run the built-in workflow
+that builds workflows and relay its interview questions; show the outline it writes before
+asking for approval. If the job seems
 too simple for Orchestra and this agent could do it directly, explain that and ask the user;
 never decide for them. If they insist, run it through Orchestra. If the user has already answered
 this fit question or explicitly insists on using Orchestra for this job, honor that answer
 without asking again.
 
 Use the installed `orchestra` command, or `node .orchestra/engine/bin/orchestra.mjs`.
-If the project has no installation, run `orchestra init` in its Git repository and explain
+If the project has no installation, run `orchestra init` in its folder (it creates the Git
+repository if needed) and explain
 that the user must install and authenticate their own CLIs and configure model tiers.
 Do not install tools, invent model names or assume subscriptions.
 
