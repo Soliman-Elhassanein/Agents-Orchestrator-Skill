@@ -103,3 +103,11 @@ copy wins), together with every helper file it names as `{adapterDir}/…`, such
 `<name>.mjs`; Orchestra refuses an adapter whose helpers are missing. Change only its `write` flags to allow what the output shows, such as local
 network access or one extra writable folder. Your CLI's sandbox documentation names the
 setting. Keep the rest of the sandbox, then run the test again.
+
+Some sandboxes have no such setting. agy's `--sandbox` (checked with agy 1.4.7 on Linux)
+makes the terminal read-only even inside its own workspace, so every shell command that
+writes fails, including a plain `touch` in the run worktree; `--new-project` and `--add-dir`
+make no difference, and its `--mode auto` may be unavailable on your account. The built-in
+adapter keeps the sandbox, because it is the safe default. If your agy agents must run tests
+or builds, remove `--sandbox` from `write` in a project copy of `agy.json` (keep it in
+`read`). agy's write calls then run with no terminal protection, so decide that per project.
