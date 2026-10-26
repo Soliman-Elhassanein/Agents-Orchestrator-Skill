@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+Changes:
+
+- `orchestra adapter test <name> --command "<cmd>"` checks whether a CLI's write sandbox
+  blocks a project command, such as a test runner that opens a local port. Orchestra runs the
+  command directly, then has the agent run it in its write sandbox, and prints both exit
+  codes with the agent's output and the adapter file to override. The orchestra skill runs
+  this check before a project's first code run, and proposes an override only with the
+  user's agreement.
+
 ## 3.0.0 — 2026-10-26
 
 Breaking changes:

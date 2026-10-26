@@ -260,6 +260,18 @@ const tests={
     assert.equal(orchRaw(dir,['adapter','test','mock']).code,0);
     assert.throws(()=>loadAdapter(dir,'../bad'),/invalid adapter/);
   },
+  'step 3: adapter test --command compares the write sandbox with a direct run'() {
+    const dir=project();
+    const works=orchRaw(dir,['adapter','test','mock','--command','test -f README.md']);
+    assert.equal(works.code,0);assert.match(works.out,/mock: works; "test -f README.md" exits 0 inside the write sandbox and outside it/);
+    const blocked=orchRaw(dir,['adapter','test','mock','--command','test -f README.md'],{MOCK_SANDBOX_BLOCK:'1'});
+    assert.equal(blocked.code,1);assert.match(blocked.out,/write sandbox blocks "test -f README.md": exit 1 inside, 0 outside/);
+    assert.match(blocked.out,/operation not permitted/);assert.match(blocked.out,/Fix: copy .*mock\.json to \.orchestra\/adapters\/mock\.json/);
+    const broken=orchRaw(dir,['adapter','test','mock','--command','test -f missing.txt'],{MOCK_CALL_LOG:join(dir,'calls.jsonl')});
+    assert.equal(broken.code,1);assert.match(broken.out,/not tested; .* outside any sandbox too/);assert.ok(!existsSync(join(dir,'calls.jsonl')),'no agent call when the command fails directly');
+    assert.equal(orchRaw(dir,['adapter','test','mock','--command']).code,1);
+    assert.equal(sh(dir,'git',['worktree','list']).trim().split('\n').length,1,'probe worktrees are removed');
+  },
   'step 3: startup handover stays at the same tier, records exact fixes, never diagnoses startup failures'() {
     const agents={bad:{cli:'mock',model:'broken',tier:2,weight:100000},good:{cli:'mock',model:'good',tier:2,weight:0.00001},strong:{cli:'mock',model:'strong',tier:3}};
     const dir=project({agents});orch(dir,['run','solo','one task','--foreground'],{MOCK_STARTUP:'broken'});

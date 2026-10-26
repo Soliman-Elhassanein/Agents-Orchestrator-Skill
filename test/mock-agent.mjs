@@ -16,6 +16,11 @@ if(env.MOCK_CRASH_TITLE && title.startsWith(env.MOCK_CRASH_TITLE))process.kill(p
 let output={text:`response from ${model}`,stop:true};
 if(env.MOCK_EVIDENCE && ['mode','propose','critique'].includes(role))output={text:`response from ${model}`,stop:true,evidence:[{file:'README.md',line:1,quote:'# demo'},{file:'README.md',line:1,quote:'wrong quote'}]};
 if(role==='adapter-test')output={text:'OK'};
+if(role==='adapter-command') {
+  // MOCK_SANDBOX_BLOCK stands in for a sandbox that stops the command.
+  const run=env.MOCK_SANDBOX_BLOCK?{status:1,stdout:'bind 127.0.0.1: operation not permitted\n'}:spawnSync(/COMMAND:\n(.*)/.exec(brief)[1],{shell:true,encoding:'utf8'});
+  output={exit:run.status,output:run.stdout};
+}
 if(role==='plan')output={taskList:'## Phase 1: Work\n- [ ] T001 [P] Write one\n- [ ] T002 [P] Write two\n'};
 if(role==='brief') {
   const tasks=/\n(\[\{"id":.*\])\nRequest:/.exec(brief);

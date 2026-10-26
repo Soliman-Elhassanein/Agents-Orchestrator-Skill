@@ -78,3 +78,27 @@ See [records](records.md) for storage and brief limits.
 Every call gets fresh artifacts: brief, stdout, stderr, normalized result and process exit.
 Read access is checked against the Git tree, including untracked files. Write access allows
 changes without requiring them; a completed write call with no changes records `changes: []`.
+
+## When the sandbox blocks your tools
+
+Built-in adapters start write calls inside the CLI's own sandbox, so an agent can change only
+its run worktree. Some project tools need more: a test runner that opens a local port, or a
+toolchain that writes a cache outside the repository. Then the agent can write code but can't
+run the tests, while Orchestra's gates, which run outside the sandbox, still can.
+
+Check each CLI once per project, with the command your gates run:
+
+```sh
+orchestra adapter test <name> --command "<test command>"
+```
+
+Orchestra runs the command in a clean worktree at `HEAD`. If it fails there, nothing else
+runs: fix the command first. Otherwise it starts the agent in a second worktree with its write
+flags and asks it to run the command once and report the exit code. It prints `works`, or
+`write sandbox blocks` with both exit codes, the agent's output and the logs. It spends one
+call and judges nothing; it reports the two exit codes.
+
+To fix a block, copy the adapter it names to `.orchestra/adapters/<name>.json` (the project
+copy wins) and change only its `write` flags to allow what the output shows, such as local
+network access or one extra writable folder. Your CLI's sandbox documentation names the
+setting. Keep the rest of the sandbox, then run the test again.

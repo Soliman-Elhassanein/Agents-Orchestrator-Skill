@@ -27,6 +27,11 @@ If the project has no installation, run `orchestra init` in its folder (it creat
 repository if needed) and explain
 that the user must install and authenticate their own CLIs and configure model tiers.
 Do not install tools, invent model names or assume subscriptions.
+Before a project's first code run, check each configured CLI with
+`orchestra adapter test <name> --command "<the project's test command>"`. If it prints
+`write sandbox blocks`, read the agent output it shows and propose to the user the smallest
+project adapter override that allows only what the command needs; write it only after they
+agree, then run the test again.
 
 - Run: `orchestra run <workflow> "<task>"`, given as its description shows, optionally
   with `--task-file <path>` and `--gate "<command>"`. There is no run without a workflow.
