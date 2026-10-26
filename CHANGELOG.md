@@ -15,6 +15,9 @@ Breaking changes:
   it; run `init` again after updating Orchestra.
 - Constitution 2.0.0: the communicator, workflow-only runs, one built-in workflow, and
   LangGraph as the sole dependency.
+- A write step that changes nothing completes with `changes: []` instead of failing as
+  `no-changes`: checks, answers and reviews are results. Orchestra reports the fact and no
+  longer diagnoses or retries empty writes.
 
 Changes:
 
@@ -31,6 +34,10 @@ Changes:
   `orchestra/<run-id>.<step>.T001-first-words-of-the-task` and parallel children
   `orchestra/<run-id>.<step>.agent-1`. Checkpoints record task branches under `branches`;
   runs started before this version resume with their old names.
+- `FINAL.md` ends with the last step's result (its text, or its output as JSON), and the
+  skill relays it to the user.
+- The README explains day-to-day use through your agent CLI, reading a run's result, and
+  the queue.
 - LangChain tracing is turned off in Orchestra's own process; agents, gates and the worker
   still receive the user's tracing settings.
 

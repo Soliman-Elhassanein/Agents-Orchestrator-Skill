@@ -55,8 +55,22 @@ task; you write any others as data files.
 
 Workflows describe themselves. `orchestra workflow list` shows every workflow available to
 you, built in, installed for your user or in your project, with what it does, what to give
-it, what it returns and the path to its guide. Orchestra ships built-in workflows for
-writing code, deliberating and creating new workflows. Every call has its own session.
+it, what it returns and the path to its guide. Every call has its own session.
+
+A run does not have to change files. A check, a question or a review is a completed run
+whose result is the agent's answer; changes, when there are any, wait on a branch until you
+land them.
+
+### Using it day to day
+
+1. Talk to your own agent CLI with the [skill](#using-it-from-your-agent) installed. Ask for
+   what you want; it picks a workflow, starts the run and watches it.
+2. When Orchestra has questions, your agent shows them to you and sends your answers back.
+   Nothing spends tokens while it waits.
+3. When the run finishes, your agent tells you the result: the answer or feedback, the
+   commits and gate results. You decide whether to keep any changes and land them.
+
+You can do the same by hand with the commands below.
 
 ## Requirements
 
@@ -141,14 +155,16 @@ or a periodic check-in is due. A return from watching does not always mean execu
 Use `orchestra status` to read the state. Answer any questions, then use `orchestra watch`
 to keep waiting. Commit input files first: uncommitted project changes are not part of runs.
 
-### 3. Inspect and land
+### 3. Read the result, inspect and land
 
 ```sh
 orchestra status --json
 ```
 
-Wait for `completed`. Read `.orchestra/runs/<run-id>/run.json` and the logs it names.
-The status output gives the branch, normally `orchestra/<run-id>`.
+Wait for `completed`. `.orchestra/runs/<run-id>/FINAL.md` ends with the last step's result:
+the agent's answer, feedback or summary. `run.json` beside it has every call, commit, gate
+and log. A run that only checked or answered something has no commits and nothing to land.
+When it changed files, the status output gives the branch, normally `orchestra/<run-id>`.
 Inspect it before landing:
 
 ```sh
@@ -202,12 +218,33 @@ map, which you must configure before work can start.
 Startup errors exclude that entry and report an exact fix. Write failures get a highest-tier
 diagnosis and revised brief before retrying on the original tier. Escalation follows
 `escalate.afterFailures`, with at least one diagnosed retry on the original tier before moving up.
-A write call that changes nothing is `no-changes`; it gets the same diagnosis and bounded retries, and cannot
-complete or unblock dependent work without a real change.
+A write call may change nothing: a check, an answer or review feedback is a completed step
+with `changes: []`. Orchestra reports that fact; you decide whether it is what you wanted.
 
 `fanout.executors` bounds how many tasks run at once. `executorRetries` limits retries;
 `agentTimeout` and `gateTimeout` limit how long calls and gates may run. `gates` contains shell
 commands; repeated `--gate` arguments override them for that run.
+
+### The queue
+
+Every `orchestra run` adds a run to the project's queue, `.orchestra/queue.json`. One
+background worker per project takes runs in order and executes them one at a time; the
+parallel work happens inside a run. `run` starts the worker when none is alive, and the
+worker exits when the queue is empty.
+
+| Command | Effect |
+|---|---|
+| `orchestra queue` | List waiting, running and finished runs. |
+| `orchestra queue add <workflow> <task>` | Queue a run without watching it. |
+| `orchestra queue edit <id> <task>`, `rm <id>`, `move <id> <position>` | Change a run that has not started. |
+| `orchestra queue hold`, `orchestra queue resume` | Stop taking new runs; start again. |
+
+A failed run holds the queue (`queue.holdOnFailure`, default true), so later runs don't start
+on top of a failure; look at it, then `orchestra queue resume`. A worker that died mid-run is
+noticed when the next worker starts and holds the queue too; `orchestra resume` continues that run.
+By default a run starts from the last completed run you have not landed yet
+(`queue.buildOnPrevious`), so queued runs build on each other and landing the last one lands
+them all. Set it to `false` to start every run from your checkout.
 
 ### Quota balancing
 

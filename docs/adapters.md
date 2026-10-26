@@ -76,5 +76,5 @@ code lessons appear only in run.json suggestions. This also applies to failed ca
 See [records](records.md) for storage and brief limits.
 
 Every call gets fresh artifacts: brief, stdout, stderr, normalized result and process exit.
-Read access is checked against the Git tree, including untracked files. Write completion
-also requires an actual tree change; an empty write is `no-changes` and blocks dependents.
+Read access is checked against the Git tree, including untracked files. Write access allows
+changes without requiring them; a completed write call with no changes records `changes: []`.

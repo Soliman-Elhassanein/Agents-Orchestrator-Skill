@@ -30,7 +30,7 @@ quota, crash and stuck markers use the same keys as a later `watch`, preventing 
 | `progress.md` | Runner | human view of state, questions, startup fixes and directions |
 | `task.md` | Worker | original request |
 | `tasks.md` | Engine plan | generated task list, checkboxes only change after merge and gates |
-| `FINAL.md` | Runner | process outcome and final revision |
+| `FINAL.md` | Runner | process outcome, final revision and the last step's result (its `text`, or its output as JSON, up to 8,000 characters) |
 | `calls/<step>[-N]/brief.md` | Runner | fresh prompt with bounded handoff, selected inputs, user answers and steering |
 | `calls/<step>[-N]/stdout.txt`, `stderr.txt` | Adapter process | raw output, including partial output from interrupted calls |
 | `calls/<step>[-N]/result.json` | Adapter runner | adapterResult:1, status, message/output, tokens or null, exitCode, startup problem/fix, optional quota/transcript |
@@ -48,9 +48,8 @@ Step records include status, attempts, token totals, structured output, actual c
 and commits for writes. Write calls record their own changed files, commits and diff;
 step `changes` and `commits` accumulate those facts without attributing other tasks’ merges
 to the worker. `diff` points to the latest write patch and `diffs` retains all write patches.
-An empty write attempt has status `no-changes`; diagnosis and bounded retries precede
-stopping dependents if no real change results.
-A clean process exit alone never makes a write step completed.
+A write call that changes nothing completes with `changes: []`; whether that is what you
+wanted is your call, not Orchestra's.
 
 `tokens` is `{calls,tokens,unreported}`. Tokens sum reported input, output and cache fields;
 it is processed volume, not billing or account consumption. A call is counted before it

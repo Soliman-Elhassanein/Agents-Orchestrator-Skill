@@ -330,11 +330,13 @@ const tests={
     assert.equal(s.status,'completed',s.error);assert.deepEqual(r.calls.map((c)=>c.entry),['strong','strong','small','small']);
     assert.equal(r.tasks.length,2);assert.match(readFileSync(join(dir,'.orchestra/runs',s.id,'tasks.md'),'utf8'),/\[x\] T001/);
   },
-  'step 5: no-changes prevents dependent work and ticks; failed gates never tick'() {
-    const dir=project();codeWorkflow(dir);taskFile(dir,'## Phase 1: Work\n- [ ] T001 Make nothing\n- [ ] T002 Depends on first\n');
-    assert.equal(orchRaw(dir,['run','code','--task-file','tasks.md','--foreground'],{MOCK_NOOP:'T001'}).code,1);
-    const r=report(dir);assert.equal(r.tokens.calls,4);assert.equal(r.steps['execute/T001'].status,'no-changes');assert.equal(r.status,'failed');
-    assert.doesNotMatch(sh(dir,'git',['show',`${state(dir).branch}:tasks.md`]),/\[x\]/);
+  'step 5: a task that changes nothing completes and reports no changes; failed gates never tick'() {
+    const dir=project();codeWorkflow(dir);taskFile(dir,'## Phase 1: Work\n- [ ] T001 Check something\n- [ ] T002 Depends on first\n');
+    assert.equal(orchRaw(dir,['run','code','--task-file','tasks.md','--foreground'],{MOCK_NOOP:'T001'}).code,0);
+    const r=report(dir);assert.equal(r.status,'completed',state(dir).error);assert.equal(r.tokens.calls,3);
+    assert.deepEqual(r.steps['execute/T001'].changes,[]);assert.equal(r.calls.filter(c=>c.purpose==='diagnosis').length,0);
+    assert.deepEqual(r.tasks.map(t=>t.status),['executed','executed']);
+    assert.match(sh(dir,'git',['show',`${state(dir).branch}:tasks.md`]),/\[x\] T001[\s\S]*\[x\] T002/);
     const gated=project();codeWorkflow(gated);taskFile(gated,'## Phase 1: Work\n- [ ] T001 Write one\n');
     assert.equal(orchRaw(gated,['run','code','--task-file','tasks.md','--gate','echo detail; exit 7','--foreground']).code,1);
     const gr=report(gated);assert.equal(gr.gates[0].exit,7);assert.equal(gr.gates[0].command,'echo detail; exit 7');assert.ok(gr.gates.every(g=>g.revision));assert.equal(gr.gates.at(-1).revision,gr.finalCommit);
@@ -553,6 +555,13 @@ Object.assign(tests, {
     orch(traced,['run','solo','change files','--gate','test "$LANGCHAIN_TRACING_V2" = true','--foreground'],{LANGCHAIN_TRACING_V2:'true'});
     assert.equal(state(traced).status,'completed',state(traced).error);assert.equal(report(traced).gates[0].exit,0);
   },
+  'solo: a run that only checks or answers completes, and its result reaches FINAL.md'() {
+    const dir=project();orch(dir,['run','solo','check the readme','--foreground'],{MOCK_NOOP:'all'});
+    const s=state(dir),r=report(dir);assert.equal(s.status,'completed',s.error);
+    assert.equal(r.finalCommit,r.baseCommit);assert.deepEqual(r.steps.task.changes,[]);assert.equal(r.calls.filter(c=>c.purpose==='diagnosis').length,0);
+    const final=readFileSync(join(dir,'.orchestra/runs',s.id,'FINAL.md'),'utf8');
+    assert.match(final,/^Execution completed\./);assert.match(final,/Result of step task:\nresponse from medium/);
+  },
   'parallel: anonymized peers see labels instead of agent names'() {
     const dir=project({agents:{a:{cli:'mock',model:'first',tier:3},b:{cli:'second',model:'second',tier:3}}});
     cpSync(join(dir,'.orchestra/adapters/mock.json'),join(dir,'.orchestra/adapters/second.json'));
@@ -695,8 +704,8 @@ Object.assign(tests, {
       if(tier===1)assert.match(text,/Prepared brief/);
     }
   },
-  'promise 1: write errors, empty writes and timeouts diagnose before same-tier retry'() {
-    for(const env of [{MOCK_FAIL:'first'},{MOCK_NOOP:'first'},{MOCK_TIMEOUT_FIRST:'1'}]) {
+  'promise 1: write errors and timeouts diagnose before same-tier retry'() {
+    for(const env of [{MOCK_FAIL:'first'},{MOCK_TIMEOUT_FIRST:'1'}]) {
       const dir=project({agentTimeout:'1s',escalate:{afterFailures:1}});
       workflow(dir,'minimal',[{id:'write',agent:{prompt:'write.md',tier:1,access:'write'}}]);
       orch(dir,['run','minimal','change files','--foreground'],env);const r=report(dir);

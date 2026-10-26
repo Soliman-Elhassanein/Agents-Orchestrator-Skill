@@ -22,12 +22,13 @@ to return at once with the run ID.
    `escalate.afterFailures` decides when the step moves up a tier.
 4. If the agent asks questions, the run waits for `orchestra answer` without spending tokens.
 
-The step needs a change: a call that changes no files counts as a failed attempt. For a
-question that needs no change, ask your own agent directly, or write a workflow whose step
-has `"access": "read"`.
+The task does not have to change files. "Check that every endpoint has a test" or "Review
+the login flow and tell me what is risky" complete with no commits; the agent's answer is
+the result. `.orchestra/runs/<run-id>/FINAL.md` ends with it, and your agent CLI relays it.
 
 ## What you get
 
-A branch `orchestra/<run-id>` with the agent's commits, and `run.json` in
-`.orchestra/runs/<run-id>/` with the calls, commits, gate exits and logs. Look at the branch,
+The agent's answer at the end of `FINAL.md`, a branch `orchestra/<run-id>` with its commits
+if it changed anything, and `run.json` in `.orchestra/runs/<run-id>/` with the calls,
+commits, gate exits and logs. Look at the branch,
 then land it onto a branch you name: `orchestra land <run-id> <branch>`.

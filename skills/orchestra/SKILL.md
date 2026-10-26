@@ -47,6 +47,9 @@ a question, relay those instructions faithfully. `orchestra steer [run-id] "<dir
 applies at the next boundary; `stop` and `resume` control interrupted runs.
 
 Report process status, commits, gate exits, logs and unknown token counts as facts.
+When a run finishes, read `.orchestra/runs/<run-id>/FINAL.md` and relay its result to the
+user: the last step's answer, feedback or summary, plus any commits. A run with no commits is
+a normal outcome for checks, questions and reviews.
 Completion describes execution. The user decides quality and whether to keep the result.
 A record a workflow leaves in its run folder stays there; the user decides where to keep it.
 Land only onto a branch the user names with `orchestra land [run-id] <target-branch>`.

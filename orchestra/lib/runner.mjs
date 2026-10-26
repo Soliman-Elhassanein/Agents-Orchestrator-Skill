@@ -145,7 +145,6 @@ class Runtime {
   async job(b,key,wt,extra='',fixed,reservations) {
     const e=this.s.steps[key] ??= {status:'running'}; e.attempts ??=[];e.failures ??=0;
     if(e.status==='completed')return e;
-    e.startBase ??= g.headSha(wt);
     e.tier ??= b.tier ?? (b.agent ? this.agents.find((a)=>a.name===b.agent)?.tier ?? 2 : 2);e.tierFailures ??=0;
     if(extra)e.extra=extra;extra=e.extra ?? extra;
     if(e.pendingFailure)await this.prepareRetry(b,key,wt,e);
@@ -194,9 +193,10 @@ class Runtime {
       }
       if(res.status==='completed') {
         if(b.access==='write') {
+          // A write step may change nothing (a check, an answer, feedback); its changes are reported as facts.
           g.commitAll(wt,`orchestra: ${key}`);
-          if(!g.changedFiles(wt,e.validationBase ?? e.startBase).length) {res.status='no-changes';res.error='write call made no changes';}
-          else this.recordWrite(wt,base,e,call,res.outDir);
+          if(g.changedFiles(wt,base).length)this.recordWrite(wt,base,e,call,res.outDir);
+          else {call.changes=[];e.changes ??=[];}
         }
         if(res.status==='completed') {e.status='completed';if(e.output && typeof e.output==='object' && typeof output==='object') {for(const field of Object.keys(e.output))delete e.output[field];Object.assign(e.output,output);}else e.output=output;e.commit=g.headSha(wt);call.status='completed';this.save();return e;}
       }
@@ -234,7 +234,6 @@ class Runtime {
         const summary=this.gateDigest(error);
         for(const {b,key} of writers) {
           const e=this.s.steps[key];
-          e.validationBase=g.headSha(this.wt);
           await this.retryFailure(b,key,this.wt,e,summary);
           await this.job(b,key,this.wt);
         }
@@ -357,7 +356,6 @@ class Runtime {
           for(const t of todo) {
             const work=entry.branches[t.id], taskKey=`${key}/${t.id}${work.redo?'/redo':''}`, e=this.s.steps[taskKey];
             const worker={...b,role:'executor',access:'write'};
-            e.validationBase=g.headSha(this.wt);
             await this.retryFailure(worker,taskKey,this.wt,e,this.gateDigest(error));
             const repaired=await this.job(worker,taskKey,this.wt,`\nSUBTASK:\n${t.id} ${t.text}`);
             Object.assign(this.s.tasks.find((r)=>r.id===t.id),{agent:repaired.agent,commits:repaired.commits,attempts:repaired.attempts.length});
@@ -453,7 +451,10 @@ class Runtime {
     finally {
       for(const e of Object.values(this.s.steps))if(['running','waiting'].includes(e.status))e.status=this.s.status==='stopped'?'stopped':'failed';
       this.s.phase='done';this.s.finishedAt=new Date().toISOString();this.s.final=`Execution ${this.s.status}. Commit: ${existsSync(this.wt)?g.headSha(this.wt):this.s.base}.`;
-      this.save();writeFileSync(this.run.path('FINAL.md'),this.s.final+'\n');
+      // The last step's output is what the user asked for: an answer, feedback or a summary of changes.
+      const last=this.outputs?.[this.previous], text=typeof last?.text==='string'?last.text:JSON.stringify(last,null,2);
+      const result=last===undefined?'':`\n\nResult of step ${this.previous}:\n${text.length>8000?text.slice(0,8000)+'\n… (full output in run.json)':text}`;
+      this.save();writeFileSync(this.run.path('FINAL.md'),this.s.final+result+'\n');
       process.off('SIGTERM',this.onSignal);process.off('SIGINT',this.onSignal);
       if(existsSync(this.wtRoot))for(const d of readdirSync(this.wtRoot))g.removeWorktree(this.root,join(this.wtRoot,d));
       if(this.s.status==='completed')for(const sep of ['.','-'])for(const branch of g.branchesWithPrefix(this.root,this.s.branch+sep))g.deleteBranch(this.root,branch);

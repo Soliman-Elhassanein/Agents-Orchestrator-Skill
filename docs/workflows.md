@@ -112,10 +112,11 @@ installed copy; it rejects stale supplied diagrams. Source packs are left untouc
 - `agent`: `prompt`, `tier` (default 2) or `agent` (config entry name), `access` (`read` by
   default or `write`), optional `sees`, optional `outputFile` (save an output field using
   `{field,path}`), and `unless` (skip when its input is present). `outputFile` paths must be
-  inside the run folder. Write steps need a real diff, including commits the agent made.
+  inside the run folder. Write access allows changes; it does not require them. A write
+  step that changes nothing completes with `changes: []`, and its output is its result.
   Before a write below the highest configured tier, the engine makes one read-only brief
-  call at that highest tier. The worker receives that brief. Write failures (including errors,
-  timeouts and empty writes) get a highest-tier diagnosis and rewritten brief before retrying
+  call at that highest tier. The worker receives that brief. Write failures (errors and
+  timeouts) get a highest-tier diagnosis and rewritten brief before retrying
   on the original tier. Escalation uses `escalate.afterFailures`, after at least one diagnosed
   retry on that tier. A directly following gate or final configured gate can trigger the same
   recovery for the write it tests. Read failures retry with a bounded digest.
