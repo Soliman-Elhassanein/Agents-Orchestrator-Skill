@@ -1,20 +1,24 @@
 # Working on Orchestra
 
 Read README.md and CONSTITUTION.md first: every change must keep the constitution's promises
-and respect its non-goals. Orchestra is a Node CLI, Node 18+, built-in modules only, no dependencies.
+and respect its non-goals. Orchestra is a Node CLI, Node 20+, whose only dependency is LangGraph
+(pinned exactly in `package.json` and `package-lock.json`).
 
 ## Layout
 
 - `orchestra/bin/orchestra.mjs`: install, queue/worker, run, status, questions, steering,
   watch/check, quota, knowledge, workflow tools, adapter tests, stop/resume, land and doctor.
-- `orchestra/lib/runner.mjs`: six-block execution, lanes, merges, gates, retries,
-  setup handover, user questions, steering and resume.
+- `orchestra/lib/graph.mjs`: compiles a workflow's data into a LangGraph state graph: steps
+  are nodes, order and `when` routes are edges, loops edge back from an `until` node.
+- `orchestra/lib/runner.mjs`: the six blocks the graph's nodes run, task branches, merges,
+  gates, retries, setup handover, user questions, steering and resume.
 - `agents.mjs`, `quota.mjs`, `balance.mjs`: adapter execution and quota balancing.
 - `context.mjs`, `digest.mjs`: fresh-call handoffs and failed-attempt summaries.
 - `git.mjs`, `state.mjs`, `lock.mjs`, `queue.mjs`: isolation, records and shared writers.
 - `knowledge.mjs`: machine notes keyed by CLI, automatic observations and approved duplicate merges.
 - `orchestra/adapters/`: three built-in adapters following the public versioned interface.
-- `workflows/`: data packs, prompts and standard-library gate scripts.
+- `workflows/`: the one built-in pack. Workflows are data packs, prompts and
+  standard-library gate scripts.
 - `skills/orchestra/SKILL.md`: the single standard skill, installed with `npx skills add`.
 - `orchestra/templates/`: development config and execution prompts.
 - `test/e2e.mjs`: mock agents, real Git/processes; never spend model tokens in tests.

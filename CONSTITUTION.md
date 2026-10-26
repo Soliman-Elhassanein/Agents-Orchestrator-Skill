@@ -10,6 +10,11 @@ The principles every change to Orchestra must keep.
 **What Orchestra does:** it orchestrates agents to get a job done, whatever the job is: code,
 research, review or deliberation.
 
+**How it is used:** you talk to your own agent CLI, the communicator. It picks a workflow,
+starts it with Orchestra and relays Orchestra's questions to you. Every run is a workflow:
+the engine takes a workflow and a task, nothing else. Orchestra ships one built-in workflow,
+a single agent doing the task; every other workflow is written by its user.
+
 Five promises define Orchestra. Every change must keep all five.
 
 1. **Cheap models do the bulk of the work.** Strong models write briefs, plans and syntheses
@@ -28,8 +33,9 @@ Orchestra is not:
 - **a judge.** It reports facts (what ran, which commits, which gates exited 0) and never
   decides whether work is "good" or "done". A loop stops only on a field in a step's structured
   output, read mechanically. Workflows that recommend leave the decision to you.
-- **a general agent framework.** It has a small, closed set of blocks. A new block needs a real
-  workflow that the existing blocks can't express.
+- **a general agent framework.** Workflows run on LangGraph, but authors see only a small,
+  closed set of blocks and routes chosen from listed values. A workflow is data, never graph
+  code. A new block needs a real workflow that the existing blocks can't express.
 - **a place for custom code per job.** Workflows are data files and prompts. The engine never
   names a workflow.
 - **the default for every task.** Work one agent can do directly should be done directly.
@@ -45,7 +51,11 @@ Orchestra is not:
 ## Delivery standards
 
 - Make each change on its own branch; never work directly on the default branch.
-- Use Node 18 or newer and built-in modules only, with no dependencies.
+- Use Node 20 or newer. The only runtime dependency is LangGraph (`@langchain/langgraph` and
+  the `@langchain/core` it requires), pinned to exact versions published at least two weeks
+  earlier. Add no other dependency.
+- Run data never leaves the machine through the dependency: Orchestra turns off LangChain
+  tracing in its own process.
 - Run `npm test` before every commit; it is the delivery gate. Tests use the mock agent and
   never spend model calls.
 - The engine core never names a CLI or a workflow, and nothing in the repository depends on
@@ -62,4 +72,4 @@ breaking any promise.
 Procedures belong in workflow files; reusable guarantees belong in the six blocks.
 Amend this constitution explicitly before changing the product's direction.
 
-**Version**: 1.1.0 | **Ratified**: 2026-10-20 | **Last amended**: 2026-10-20
+**Version**: 2.0.0 | **Ratified**: 2026-10-20 | **Last amended**: 2026-10-26
