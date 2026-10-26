@@ -5,16 +5,16 @@
  * answer [id] <answers> | steer [id] <direction> | resume [id] | stop [id]
  * status [id] [--json] | list | check [--json] | watch | quota [--no-refresh] [--json]
  * run / watch: [--every <minutes>] [--stuck-after <minutes>] — run watches unless detached or foreground
- * queue [add <workflow> <task>|edit|rm|move|hold|resume] | adapter test <name>
+ * queue [add <workflow> <task>|edit|rm|move|hold|resume] | adapter test <name> [--command <cmd>]
  * workflow list [--json] | check <file> | diagram <name|file> [--out <file>|--text] | run <name> --dry | add <path|git-url> [--user]
  * knowledge [add <text>|approve <id>|rm <id>] [--cli <name>] [--json] | land [id] <target-branch> | doctor
  */
 import { spawn, spawnSync } from "node:child_process";
-import { appendFileSync, cpSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, closeSync, cpSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { detectedAgents, loadAdapter, quotaKey, runAgent } from "../lib/agents.mjs";
-import { loadConfig } from "../lib/config.mjs";
+import { loadConfig, parseDuration } from "../lib/config.mjs";
 import * as g from "../lib/git.mjs";
 import * as queue from "../lib/queue.mjs";
 import { listWorkflows, loadWorkflow, workflowFile, builtinWorkflows, checkWorkflow, dryWorkflow, addWorkflow } from "../lib/workflows.mjs";
@@ -695,10 +695,12 @@ async function cmdDoctor() {
 }
 
 async function cmdAdapter(args) {
-  if(args[0]!=='test' || !args[1])die('adapter test <name>');
+  const commandAt=args.indexOf('--command'), command=commandAt>0?args[commandAt+1]:undefined;
+  if(args[0]!=='test' || !args[1] || args[1].startsWith('--') || (commandAt>0 && !command?.trim()) || args.length!==(commandAt>0?4:2))die('adapter test <name> [--command "<shell command>"]');
   const root=findProjectRoot(), cfg=loadConfig(root);
   const agent=allAgents(cfg).find((a)=>a.cli===args[1]) ?? {cli:args[1]};
   const dir=join(root,'.orchestra','adapter-tests',newRunId()), wt=join(dir,'tree');mkdirSync(dir,{recursive:true});
+  if(command)return adapterCommandTest(root,cfg,agent,dir,command);
   g.addDetachedWorktree(root,wt,g.headSha(root));
   try {
     const before=g.headSha(wt), result=await runAgent(agent,{root,cwd:wt,outDir:join(dir,'call'),readOnly:true,timeout:60000,
@@ -708,6 +710,38 @@ async function cmdAdapter(args) {
     if(result.startup)console.log(`Fix: ${result.startup.fix}`);
     if(!ok)process.exitCode=1;
   } finally {g.removeWorktree(root,wt);}
+}
+
+// Runs one project command the way gates do, then inside the agent's write sandbox, and reports
+// whether the sandbox blocks it. Facts only: both exit codes, the agent's output and the logs.
+async function adapterCommandTest(root,cfg,agent,dir,command) {
+  const revision=g.headSha(root), timeout=parseDuration(cfg.gateTimeout) ?? 1200000, outside=join(dir,'outside'), inside=join(dir,'inside');
+  const log=join(dir,'outside.log'), fd=openSync(log,'w');
+  g.addDetachedWorktree(root,outside,revision);
+  let direct;
+  try {direct=spawnSync(command,{shell:true,cwd:outside,env:childEnv(),stdio:['ignore',fd,fd],timeout}).status;}
+  finally {closeSync(fd);g.removeWorktree(root,outside);}
+  if(direct!==0) {
+    console.log(`${agent.cli}: not tested; "${command}" exits ${direct ?? 'unknown'} outside any sandbox too, so fix the command first. Log ${log}`);
+    process.exitCode=1;return;
+  }
+  g.addDetachedWorktree(root,inside,revision);
+  try {
+    const result=await runAgent(agent,{root,cwd:inside,outDir:join(dir,'call'),readOnly:false,timeout:parseDuration(cfg.agentTimeout) ?? 1200000,
+      brief:`ORCHESTRA ROLE: adapter-command\nCYCLE: 1\nRun this shell command once from the current directory, exactly as written, then stop. Do not change, fix or retry anything.\nCOMMAND:\n${command}\nReturn JSON {"exit": its exit code as a number, "output": "the last 40 lines it printed"}.`});
+    const output=result.output ?? {}, exit=Number.isInteger(output.exit)?output.exit:null;
+    if(result.startup || result.status!=='completed' || exit===null) {
+      console.log(`${agent.cli}: failed; the agent ran but reported no exit code; exit ${result.exitCode ?? 'unknown'}; logs ${result.outDir}`);
+      if(result.startup)console.log(`Fix: ${result.startup.fix}`);
+      process.exitCode=1;return;
+    }
+    if(exit===0) {console.log(`${agent.cli}: works; "${command}" exits 0 inside the write sandbox and outside it; logs ${result.outDir}`);return;}
+    let adapter;try{adapter=join(loadAdapter(root,agent.cli).dir,`${agent.cli}.json`);}catch{adapter=`${agent.cli}.json`;}
+    console.log(`${agent.cli}: write sandbox blocks "${command}": exit ${exit} inside, 0 outside; logs ${result.outDir}, ${log}`);
+    if(typeof output.output==='string' && output.output.trim())console.log(`Agent output:\n${output.output.trim().split('\n').slice(-40).join('\n')}`);
+    console.log(`Fix: copy ${adapter} to .orchestra/adapters/${agent.cli}.json and allow only what the output above shows the command needs in its "write" flags, then run this test again.`);
+    process.exitCode=1;
+  } finally {g.removeWorktree(root,inside);}
 }
 
 // ── dispatch ────────────────────────────────────────────────────────────────

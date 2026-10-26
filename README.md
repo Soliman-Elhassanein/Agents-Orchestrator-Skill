@@ -90,7 +90,7 @@ sudo apt install bubblewrap socat      # Debian / Ubuntu
 
 If they are missing, the failed call is reported with this fix and Claude is left out of the
 run. Note that `orchestra adapter test claude` makes a read-only call, so it doesn't exercise
-the write sandbox.
+the write sandbox; add `--command "<your test command>"` to check that.
 
 ## Install
 
@@ -141,6 +141,19 @@ Replace `<name>` with a configured adapter name, such as `claude`, `codex` or `a
 `doctor` checks Node, a Git commit and configured executables on PATH. It does not verify login.
 `adapter test` makes one short real read-only call and prints its outcome and log path.
 Repeat it for each CLI you plan to use.
+
+Agents write inside their CLI's sandbox, which may block your project's tools: a test runner
+that opens a local port, or a toolchain that writes a cache outside the repository. Check
+your test command once per CLI before the first run:
+
+```sh
+orchestra adapter test codex --command "npm test"
+```
+
+Orchestra runs the command itself, then has the agent run it inside its write sandbox, and
+prints both exit codes. If only the sandboxed run fails, it shows the agent's output and the
+adapter file to copy into `.orchestra/adapters/`; allow only what the output shows the
+command needs. See [When the sandbox blocks your tools](docs/adapters.md#when-the-sandbox-blocks-your-tools).
 
 ### 2. Run one task
 
@@ -444,7 +457,7 @@ project pack, explicitly track only `.orchestra/workflows/<name>/`.
 init [--force]
 run <workflow> [<task>] [--task-file <file>] [--gate <cmd>]
     [--detach|--foreground] [--every <minutes>] [--stuck-after <minutes>]
-adapter test <name>
+adapter test <name> [--command <cmd>]
 workflow list [--json] | check <file> | diagram <name|file> [--out <file>|--text] | run <name> --dry | add <git-url|path> [--user]
 queue [add <workflow> <task> | edit <id> <task> | rm <id> | move <id> <position> | hold | resume]
 status [run-id] [--json]        list
