@@ -14,6 +14,9 @@ Changes:
   call with an empty reply. `adapter test --command` prints the error when it reads no exit
   code, lists the helper files to copy, and says to edit a project adapter rather than copy
   it onto itself.
+- The adapter guide says that agy's `--sandbox` makes the terminal read-only even in its own
+  workspace, so sandboxed agy write steps can't run tests or builds, and how to opt out per
+  project.
 - `operatorUpdateMinutes` replaces `communicatorUpdateMinutes`; the old key still works.
 
 - `new-workflow` keeps designs as small as the user's description. The interviewer and the
