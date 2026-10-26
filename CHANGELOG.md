@@ -4,6 +4,13 @@
 
 Changes:
 
+- Constitution 2.2.0: the agent CLI you talk to is now the operator, not the communicator.
+  Besides starting runs and relaying questions, it keeps runs going: when something outside
+  the workflow stops a run, it reads the machine knowledge, fixes the cause on its own,
+  checks the fix, records the lesson and resumes. It waits for you only on decisions. The
+  skill says which CLI the operator is, and lists what it fixes and what it asks.
+- `operatorUpdateMinutes` replaces `communicatorUpdateMinutes`; the old key still works.
+
 - `new-workflow` keeps designs as small as the user's description. The interviewer and the
   reviewers no longer propose safeguards, scripts or limits the user didn't ask for, and
   they treat Orchestra's defaults for failed checks, retries, budgets and loop limits as

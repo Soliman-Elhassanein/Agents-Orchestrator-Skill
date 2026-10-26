@@ -1,10 +1,10 @@
 /**
- * The task queue. The Communicator adds the user's requests here; one background worker per
+ * The task queue. The operator adds the user's requests here; one background worker per
  * project takes them one at a time. A task can be edited, removed or reordered until the worker
  * picks it up. If a run doesn't end completed, the queue is held (by default) until the user
  * decides — later tasks often build on earlier ones.
  *
- * All writes go through the project lock (lock.mjs) so the Communicator and the worker never race.
+ * All writes go through the project lock (lock.mjs) so the operator and the worker never race.
  */
 import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";

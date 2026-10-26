@@ -413,7 +413,7 @@ function cmdResume(args) {
   if (ensureWorker(root)) console.log("Worker started.");
 }
 
-/** Everything the Communicator should tell the user about without being asked. */
+/** Everything the operator should tell the user about without being asked. */
 function healthReport(root) {
   const alerts = [];
   const q = queue.loadQueue(root);
@@ -495,8 +495,8 @@ function tailOf(file, lines = 8) {
 }
 
 /**
- * Wait — using no model tokens — until something needs the Communicator, then print it and exit.
- * The Communicator runs this as a background command, so it is only woken (and only spends
+ * Wait — using no model tokens — until something needs the operator, then print it and exit.
+ * The operator runs this as a background command, so it is only woken (and only spends
  * tokens) when there is news: questions, a finished run, a crash, a held queue, or (opt-in)
  * a periodic progress tick. Exit 0 = event, 3 = nothing is running (don't restart the watch).
  */
@@ -506,7 +506,7 @@ async function cmdWatch(args, runId = null) {
   let cfg = {};
   try { cfg = loadConfig(root); } catch { /* config broken: defaults below, check reports it */ }
   const everyIdx = args.indexOf("--every");
-  const everyMin = everyIdx === -1 ? (cfg.communicatorUpdateMinutes ?? 15) : Number(args[everyIdx + 1]);
+  const everyMin = everyIdx === -1 ? (cfg.operatorUpdateMinutes ?? cfg.communicatorUpdateMinutes ?? 15) : Number(args[everyIdx + 1]);
   const everyMs = everyMin > 0 ? everyMin * 60_000 : 0;
   const stuckIdx = args.indexOf("--stuck-after");
   const stuckMs = (stuckIdx === -1 ? cfg.stuckAfterMinutes ?? 10 : Number(args[stuckIdx + 1])) * 60_000;
@@ -514,7 +514,7 @@ async function cmdWatch(args, runId = null) {
   let lastScan = 0;
 
   // Each attention event is reported once: restarting the watcher after handling an event never
-  // re-wakes the Communicator for the same unanswered batch or the same crash.
+  // re-wakes the operator for the same unanswered batch or the same crash.
   const markerDir = join(root, ".orchestra", "watch");
   mkdirSync(markerDir, { recursive: true });
   const once = (key) => {
