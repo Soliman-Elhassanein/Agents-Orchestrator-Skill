@@ -3,6 +3,18 @@
  */
 import { basename, resolve } from "node:path";
 
+// LangChain sends traces to a hosted service when one of these is "true". Orchestra clears them
+// in its own process, so no run data leaves the machine, and hands the user's values back to
+// every process it starts.
+const TRACING = ["LANGSMITH_TRACING_V2", "LANGCHAIN_TRACING_V2", "LANGSMITH_TRACING", "LANGCHAIN_TRACING"];
+const userTracing = Object.fromEntries(TRACING.filter((k) => k in process.env).map((k) => [k, process.env[k]]));
+for (const k of TRACING) delete process.env[k];
+
+/** The environment for agents, gates and workers: Orchestra's own, with the user's tracing settings. */
+export function childEnv() {
+  return { ...process.env, ...userTracing };
+}
+
 
 /** Identify a notification by its project's root folder, without exposing the full path. */
 export function projectMessage(root, message) {

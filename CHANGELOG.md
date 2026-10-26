@@ -1,5 +1,39 @@
 # Changelog
 
+## 3.0.0 — 2026-10-26
+
+Breaking changes:
+
+- Every run is a workflow. `orchestra run <workflow> "<task>"` and
+  `orchestra queue add <workflow> <task>` name one; `--tier` and `--access`, which only
+  applied to runs without a workflow, are removed.
+- Orchestra ships one built-in workflow, `solo`: a single agent does the task. The `code`,
+  `council` (and its modes) and `new-workflow` built-ins are removed; they remain in the
+  `archive/pre-langgraph` tag. Write your own workflows as data packs.
+- Node 20 or newer. LangGraph (`@langchain/langgraph` 1.4.21 with `@langchain/core` 1.2.17)
+  is the one dependency, pinned exactly. `orchestra init` links the project's engine copy to
+  it; run `init` again after updating Orchestra.
+- Constitution 2.0.0: the communicator, workflow-only runs, one built-in workflow, and
+  LangGraph as the sole dependency.
+
+Changes:
+
+- Workflows run as LangGraph state graphs compiled from their data: steps are nodes, order
+  and routes are edges, loops edge back from an `until` node. Run records stay the durable
+  checkpoint, so resume works as before.
+- Workflow format v3 adds routing: an `agent` step lists `choices`, and later steps run only
+  `when` it returned their value. Only listed values route; anything else is a failed attempt
+  and is retried. Routes are validated when a workflow loads, shown in diagrams and followed
+  (first value) by dry runs.
+- The `lanes` block is now `tasks`. v1 and v2 packs keep the old name and still load;
+  diagrams of packs that use it need regenerating.
+- Readable names: run IDs are `20261026-142233-k3fq`, task branches
+  `orchestra/<run-id>.<step>.T001-first-words-of-the-task` and parallel children
+  `orchestra/<run-id>.<step>.agent-1`. Checkpoints record task branches under `branches`;
+  runs started before this version resume with their old names.
+- LangChain tracing is turned off in Orchestra's own process; agents, gates and the worker
+  still receive the user's tracing settings.
+
 ## 2.2.0 — 2026-10-21
 
 - Workflow format v2 adds a required `description`: what the workflow does, what to give

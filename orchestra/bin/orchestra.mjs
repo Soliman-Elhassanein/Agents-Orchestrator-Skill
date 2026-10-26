@@ -1,16 +1,16 @@
 #!/usr/bin/env node
 /**
  * Orchestra — parallel agent execution with quota balancing and idle waiting.
- * init | run [workflow] <task> [--task-file <file>] [--tier N] [--gate <cmd>] [--detach|--foreground]
+ * init | run <workflow> [task] [--task-file <file>] [--gate <cmd>] [--detach|--foreground]
  * answer [id] <answers> | steer [id] <direction> | resume [id] | stop [id]
  * status [id] [--json] | list | check [--json] | watch | quota [--no-refresh] [--json]
  * run / watch: [--every <minutes>] [--stuck-after <minutes>] — run watches unless detached or foreground
- * queue [add|edit|rm|move|hold|resume] | adapter test <name>
+ * queue [add <workflow> <task>|edit|rm|move|hold|resume] | adapter test <name>
  * workflow list [--json] | check <file> | diagram <name|file> [--out <file>] | run <name> --dry | add <path|git-url> [--user]
  * knowledge [add <text>|approve <id>|rm <id>] [--cli <name>] [--json] | land [id] <target-branch> | doctor
  */
 import { spawn, spawnSync } from "node:child_process";
-import { appendFileSync, cpSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, cpSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { detectedAgents, loadAdapter, quotaKey, runAgent } from "../lib/agents.mjs";
@@ -20,6 +20,7 @@ import * as queue from "../lib/queue.mjs";
 import { listWorkflows, loadWorkflow, workflowFile, builtinWorkflows, checkWorkflow, dryWorkflow, addWorkflow } from "../lib/workflows.mjs";
 import { writeWorkflowDiagram } from "../tools/diagram.mjs";
 import { runLoop } from "../lib/runner.mjs";
+import { childEnv } from "../lib/util.mjs";
 import { RunState, latestRunId, listRuns, newRunId, oneLine } from "../lib/state.mjs";
 import { addLessons, approveLesson, loadKnowledge, removeLesson, renderKnowledge } from "../lib/knowledge.mjs";
 import { loadQuota, quotaWarnings, refreshQuota, renderQuota } from "../lib/quota.mjs";
@@ -95,6 +96,12 @@ function cmdInit(args) {
     for (const part of ["bin", "lib", "adapters", "templates", "tools"]) cpSync(join(ENGINE_DIR, part), join(engine, part), { recursive: true });
     cpSync(join(ENGINE_DIR,existsSync(join(ENGINE_DIR,'docs'))?'docs':'../docs'),join(engine,'docs'),{recursive:true});
     cpSync(builtinWorkflows,join(engine,'workflows'),{recursive:true});
+    // The engine runs workflows on LangGraph. The copy links the dependencies of the install that
+    // ran init (a copy where links are not allowed); running init again refreshes both.
+    const modules=[join(ENGINE_DIR,'node_modules'),join(ENGINE_DIR,'../node_modules')].find((d)=>existsSync(join(d,'@langchain/langgraph')));
+    if(!modules)die('LangGraph is not installed next to Orchestra; fix: run npm install in the Orchestra folder');
+    try {symlinkSync(realpathSync(modules),join(engine,'node_modules'),'junction');}
+    catch {cpSync(modules,join(engine,'node_modules'),{recursive:true});}
   }
   const config = join(orch, "config.json");
   if (!existsSync(config) || args.includes("--force")) {
@@ -208,7 +215,7 @@ function ensureWorker(root) {
     if (pidAlive(readPid(root))) return false;
     const log = openSync(join(root, ".orchestra", "worker.log"), "a");
     const child = spawn(process.execPath, [fileURLToPath(import.meta.url), "_worker"], {
-      cwd: root, detached: true, stdio: ["ignore", log, log], env: process.env,
+      cwd: root, detached: true, stdio: ["ignore", log, log], env: childEnv(),
     });
     writeFileSync(pidFile(root), String(child.pid));
     child.unref();
@@ -224,21 +231,22 @@ async function cmdRun(args) {
   const words=[], options={}, watchArgs=[];
   for(let i=0;i<args.length;i++) {
     const arg=args[i];
-    if(['--task-file','--tier','--gate','--access'].includes(arg)) {
+    if(['--task-file','--gate'].includes(arg)) {
       const value=args[++i];if(!value || value.startsWith('--'))die(`${arg} needs a value`);
-      if(arg==='--access'){if(!['read','write'].includes(value))die('--access must be read or write');options.access=value;}
-      else if(arg==='--gate')(options.gates ??=[]).push(value);
-      else if(arg==='--tier'){options.tier=Number(value);if(!Number.isSafeInteger(options.tier)||options.tier<1)die('--tier must be positive');}
+      if(arg==='--gate')(options.gates ??=[]).push(value);
       else options.taskFile=resolve(value);
     } else if(['--every','--stuck-after'].includes(arg)) {
       const value=args[++i];if(!value || value.startsWith('--'))die(`${arg} needs a value`);
       watchArgs.push(arg,value);
     } else if(!['--foreground','--detach'].includes(arg)) {if(arg.startsWith('--'))die(`unknown run option: ${arg}`);words.push(arg);}
   }
-  if(words.length>=2 || (words.length===1 && options.taskFile))options.workflow=words.shift();
+  // Every run goes through a workflow; the first word names it.
+  options.workflow=words.shift();
+  const usage='usage: orchestra run <workflow> "<task>"; orchestra workflow list shows the workflows';
+  if(!options.workflow)die(usage);
+  try {loadWorkflow(root,options.workflow);}catch(e){die(`${e.message}; ${usage}`);}
   const task=words.join(' ') || (options.taskFile ? `Execute task list ${options.taskFile}` : '');
-  if(!task)die('give a task, or a workflow and --task-file');
-  if(options.workflow)guard(()=>loadWorkflow(root,options.workflow));
+  if(!task)die(`give a task, or --task-file; ${usage}`);
   if (!g.git(root, ["rev-parse", "--verify", "HEAD"], { allowFail: true }).ok) die("the repository needs at least one commit");
   const dirty = !g.isClean(root);
 
@@ -274,9 +282,11 @@ function cmdQueue(args) {
       console.log(queue.renderQueue(queue.loadQueue(root)));
       return;
     case "add": {
-      const task = taskFrom(rest);
-      if (!task) die("queue add needs a task");
-      const item = guard(() => queue.addTask(root, task));
+      const [workflow, ...words] = rest;
+      const task = taskFrom(words);
+      if (!workflow || !task) die("queue add <workflow> <task…>");
+      guard(() => loadWorkflow(root, workflow));
+      const item = guard(() => queue.addTask(root, task, { workflow }));
       console.log(`Queued as ${item.id} (position ${item.position}).`);
       if (!queue.loadQueue(root).held) ensureWorker(root);
       return;
@@ -387,7 +397,7 @@ function cmdResume(args) {
     q.items.splice(firstPending === -1 ? q.items.length : firstPending, 0, item);
     q.held = null;
   }));
-  console.log(`Run ${s.id} will resume its unfinished lanes.`);
+  console.log(`Run ${s.id} will resume its unfinished steps and task branches.`);
   if (ensureWorker(root)) console.log("Worker started.");
 }
 
@@ -664,7 +674,7 @@ async function cmdDoctor() {
   const root = findProjectRoot();
   const cfg = loadConfig(root);
   const check = (label, ok) => { console.log(`${ok ? "ok" : "missing"} ${label}`); if (!ok) process.exitCode = 1; };
-  check("Node 18+", Number(process.versions.node.split(".")[0]) >= 18);
+  check("Node 20+", Number(process.versions.node.split(".")[0]) >= 20);
   check("git commit", g.git(root, ["rev-parse", "--verify", "HEAD"], { allowFail: true }).ok);
   for (const agent of allAgents(cfg)) {
     const a=loadAdapter(root,agent.cli);

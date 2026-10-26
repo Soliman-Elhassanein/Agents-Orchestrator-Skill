@@ -1,0 +1,17 @@
+{
+  "workflow": 3,
+  "description": "One agent does the task in a single job and its changes are committed on the run branch. Give the task: orchestra run solo \"Add a health check endpoint with a test\". Returns a run branch with the commits, gate exits and logs in run.json; you inspect it and land it.",
+  "budget": {
+    "calls": 32
+  },
+  "steps": [
+    {
+      "id": "task",
+      "agent": {
+        "prompt": "task.md",
+        "tier": 2,
+        "access": "write"
+      }
+    }
+  ]
+}

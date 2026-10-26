@@ -6,7 +6,20 @@ import { workflowDiagram, writeWorkflowDiagram } from '../tools/diagram.mjs';
 import { withLock } from './lock.mjs';
 import { engineDir } from './agents.mjs';
 export const builtinWorkflows=existsSync(join(engineDir,'workflows')) ? join(engineDir,'workflows') : join(dirname(engineDir),'workflows');
-export const blocks = ['agent','parallel','ask','gate','loop','lanes'];
+export const blocks = ['agent','parallel','ask','gate','loop','tasks'];
+// v1 and v2 packs name the task-list block `lanes`; loading renames it.
+export function normalizeWorkflow(w) {
+  const step=({lanes,...s})=>{
+    if(lanes!==undefined)s.tasks=lanes;
+    if(s.loop?.steps)s.loop={...s.loop,steps:s.loop.steps.map(step)};
+    return s;
+  };
+  return {...w,steps:w.steps?.map(step)};
+}
+// A step with `when` runs only if the named earlier step chose that value.
+export function routed(step,outputs,get) {
+  return !step.when || get(outputs[step.when.step],step.when.field)===step.when.equals;
+}
 export function workflowFile(root,name) {
   if(!/^[\w-]+$/.test(name))throw new Error('invalid workflow name');
   const file=[join(root,'.orchestra/workflows'),join(homedir(),'.config/orchestra/workflows'),builtinWorkflows]
@@ -30,23 +43,38 @@ export function listWorkflows(root) {
 }
 export function loadWorkflow(root,name) {
   const file=workflowFile(root,name),data=JSON.parse(readFileSync(file,'utf8'));validateWorkflow(data,dirname(file));
-  return { ...data, dir:dirname(file) };
+  return { ...normalizeWorkflow(data), dir:dirname(file) };
 }
 export function validateWorkflow(w,dir) {
-  // v2 adds a required description; v1 packs without one remain valid.
-  const fields=w?.workflow===2?['workflow','description','budget','steps']:['workflow','budget','steps'];
+  // v2 adds a required description; v3 adds routing and names the task-list block `tasks`.
+  const fields=w?.workflow>=2?['workflow','description','budget','steps']:['workflow','budget','steps'];
   if(!w || Object.keys(w).some((k)=>!fields.includes(k)) || Object.keys(w.budget ?? {}).some((k)=>k!=='calls'))throw new Error('unknown workflow field; workflows contain data only');
-  if(![1,2].includes(w.workflow) || !Number.isSafeInteger(w.budget?.calls) || w.budget.calls<1)throw new Error('workflow v1 or v2 requires a positive calls budget');
-  if(w.workflow===2 && (typeof w.description!=='string' || !w.description.trim()))throw new Error('workflow v2 requires a description: what it does, what to give it and what it returns');
-  const walk=(steps)=>{
+  if(![1,2,3].includes(w.workflow) || !Number.isSafeInteger(w.budget?.calls) || w.budget.calls<1)throw new Error('workflow v1, v2 or v3 requires a positive calls budget');
+  if(w.workflow>=2 && (typeof w.description!=='string' || !w.description.trim()))throw new Error(`workflow v${w.workflow} requires a description: what it does, what to give it and what it returns`);
+  const v3=w.workflow===3, known=v3?blocks:blocks.map((k)=>k==='tasks'?'lanes':k);
+  // visible: earlier steps here and before each enclosing loop, by id; only they can route.
+  const walk=(steps,visible=new Map())=>{
+    visible=new Map(visible);
     if(!Array.isArray(steps) || !steps.length)throw new Error('steps must be non-empty');
     const ids=new Set();
     for(const s of steps) {
       if(!s || typeof s!=='object')throw new Error('invalid step');
-      const keys=blocks.filter((k)=>s[k]!==undefined);
-      if(keys.length!==1 || typeof s.id!=='string' || !/^[\w-]+$/.test(s.id) || ids.has(s.id))throw new Error('each step needs a unique id and one known block');
-      ids.add(s.id); const k=keys[0], b=s[k];
-      if(Object.keys(s).some((p)=>p!=='id' && p!==k) || !b || typeof b!=='object' || Array.isArray(b))throw new Error(`invalid step ${s.id}`);
+      if(v3 && s.lanes!==undefined)throw new Error('workflow v3 names the lanes block tasks');
+      const keys=known.filter((k)=>s[k]!==undefined);
+      // Ids starting with "__" are reserved for the workflow graph's own nodes.
+      if(keys.length!==1 || typeof s.id!=='string' || !/^[\w-]+$/.test(s.id) || s.id.startsWith('__') || ids.has(s.id))throw new Error('each step needs a unique id and one known block');
+      ids.add(s.id); const raw=keys[0], k=raw==='lanes'?'tasks':raw, b=s[raw];
+      if(Object.keys(s).some((p)=>p!=='id' && p!==raw && !(v3 && p==='when')) || !b || typeof b!=='object' || Array.isArray(b))throw new Error(`invalid step ${s.id}`);
+      if(s.when!==undefined) {
+        const w=s.when, source=visible.get(w?.step)?.agent?.choices;
+        if(!w || typeof w!=='object' || Object.keys(w).sort().join(',')!=='equals,field,step')throw new Error(`step ${s.id}: when needs step, field and equals`);
+        if(!source || source.field!==w.field || !source.values.includes(w.equals))throw new Error(`step ${s.id}: when must name an earlier step's choices field and one of its values`);
+      }
+      if(b.choices!==undefined) {
+        const c=b.choices;
+        if(!v3 || k!=='agent')throw new Error('choices need workflow v3 and an agent step');
+        if(!c || typeof c!=='object' || Object.keys(c).sort().join(',')!=='field,values' || typeof c.field!=='string' || !/^[\w-]+$/.test(c.field) || !Array.isArray(c.values) || c.values.length<2 || c.values.some((v)=>typeof v!=='string' || !v.trim()) || new Set(c.values).size!==c.values.length)throw new Error(`step ${s.id}: choices need a field and two or more distinct text values`);
+      }
       if(b.access && !['read','write'].includes(b.access))throw new Error('access must be read or write');
       if(b.tier!==undefined && (!Number.isSafeInteger(b.tier)||b.tier<1))throw new Error('tier must be positive');
       if(b.prompt && (typeof b.prompt!=='string' || !existsSync(join(dir,b.prompt)) || typeof b.prompt==='string' && (!statSync(join(dir,b.prompt)).isFile() || !within(dirname(dir),realpathSync(join(dir,b.prompt))))))throw new Error(`missing prompt ${b.prompt}`);
@@ -56,11 +84,12 @@ export function validateWorkflow(w,dir) {
       if(k==='parallel' && b.count!==undefined && (!Number.isSafeInteger(b.count)||b.count<1))throw new Error('parallel count must be positive');
       if(k==='gate' && (typeof b.command!=='string' || !b.command.trim()))throw new Error('gate command required');
       if(k==='ask' && (b.questions!==undefined && (!Array.isArray(b.questions)||b.questions.some((q)=>typeof q!=='string' || !q.trim())) || !b.prompt && !b.questions?.length))throw new Error('ask questions required');
-      if(k==='loop') {if(!Number.isSafeInteger(b.max)||b.max<1 || !b.until?.step || !b.until.field || !Object.hasOwn(b.until,'equals') || (b.until.equals!==null && typeof b.until.equals==='object'))throw new Error('loop needs max and structured until');walk(b.steps);if(!b.steps.some((s)=>s.id===b.until.step))throw new Error('loop until must reference a child step');}
+      if(k==='loop') {if(!Number.isSafeInteger(b.max)||b.max<1 || !b.until?.step || !b.until.field || !Object.hasOwn(b.until,'equals') || (b.until.equals!==null && typeof b.until.equals==='object'))throw new Error('loop needs max and structured until');walk(b.steps,visible);if(!b.steps.some((s)=>s.id===b.until.step))throw new Error('loop until must reference a child step');}
       if(b.sees!==undefined && b.sees!=='previous' && (!Array.isArray(b.sees) || b.sees.some((s)=>typeof s!=='string')))throw new Error('sees must name earlier steps');
-      if(k==='lanes' && b.access && b.access!=='write')throw new Error('lanes requires write access');
-      const allowed={agent:['prompt','tier','agent','access','sees','unless','outputFile'],parallel:['prompt','tier','agent','access','sees','count','distinct','anonymize'],ask:['prompt','questions'],gate:['command'],loop:['steps','max','until'],lanes:['taskFile','tier','access']}[k];
-      if(Object.keys(b).some((p)=>!allowed.includes(p)))throw new Error(`unknown ${k} field`);
+      if(k==='tasks' && b.access && b.access!=='write')throw new Error(`${raw} requires write access`);
+      const allowed={agent:['prompt','tier','agent','access','sees','unless','outputFile','choices'],parallel:['prompt','tier','agent','access','sees','count','distinct','anonymize'],ask:['prompt','questions'],gate:['command'],loop:['steps','max','until'],tasks:['taskFile','tier','access']}[k];
+      if(Object.keys(b).some((p)=>!allowed.includes(p)))throw new Error(`unknown ${raw} field`);
+      visible.set(s.id,s);
     }
   }; walk(w.steps);
 }
@@ -85,15 +114,17 @@ export function checkWorkflow(file,diagram=true) {
   if(diagram && (!existsSync(drawing) || readFileSync(drawing,'utf8')!==workflowDiagram(w)))throw new Error(`missing or stale workflow.drawio; fix: orchestra workflow diagram ${basename(file)==='workflow.json'?basename(dir):file} (file: ${JSON.stringify(resolve(file))})`);
   return {...w,dir};
 }
-export function dryWorkflow(w,emit=console.log) {
-  let calls=0;const outputs={};
+export function dryWorkflow(raw,emit=console.log) {
+  const w=normalizeWorkflow(raw);let calls=0;const outputs={};
+  const field=(o,p)=>String(p).split('.').reduce((v,k)=>v?.[k],o);
   const walk=(steps,prefix='')=>{for(const s of steps){
     const k=blocks.find((k)=>s[k]),b=s[k],key=prefix+s.id;
-    emit(`${key}: ${k}${k==='gate'?` (mock exit 0; not executed) ${b.command}`:k==='ask'?' (mock user answer)':k==='lanes'?' (mock task list; no project writes)':''}`);
+    if(!routed(s,outputs,field)){emit(`${key}: ${k} (skipped: runs when ${s.when.step}.${s.when.field} = ${JSON.stringify(s.when.equals)})`);continue;}
+    emit(`${key}: ${k}${k==='gate'?` (mock exit 0; not executed) ${b.command}`:k==='ask'?' (mock user answer)':k==='tasks'?' (mock task list; no project writes)':''}`);
     if(k==='loop'){for(let i=0;i<b.max;i++)walk(b.steps,`${key}/${i}/`);outputs[s.id]={[b.until.field]:b.until.equals};}
-    else if(['agent','parallel','lanes'].includes(k)){
+    else if(['agent','parallel','tasks'].includes(k)){
       const call=(label,tier,access)=>{if(++calls>w.budget.calls)throw new Error('agent call budget exhausted in dry run');emit(`  ${key}/${label}: mock agent; tier ${tier}; ${access}`);};
-      if(k==='lanes') {
+      if(k==='tasks') {
         emit('  engine: plan if no task file; one brief call per phase below highest tier');
         if(!b.taskFile)call('plan','highest','read');
         call('phase-brief','highest','read');call('task',b.tier ?? 1,'write');
@@ -105,7 +136,8 @@ export function dryWorkflow(w,emit=console.log) {
         }
         if(k==='parallel')call('synthesis','highest','read');
       }
-      outputs[s.id]={mock:true};
+      outputs[s.id]=b.choices?{[b.choices.field]:b.choices.values[0]}:{mock:true};
+      if(b.choices)emit(`  ${key}: mock choice ${b.choices.field} = ${JSON.stringify(b.choices.values[0])} (first listed)`);
     }else outputs[s.id]={mock:true};
   }};
   walk(w.steps);emit(`Dry run: ${calls}/${w.budget.calls} mock calls; no processes, quota reads or writes.`);return outputs;

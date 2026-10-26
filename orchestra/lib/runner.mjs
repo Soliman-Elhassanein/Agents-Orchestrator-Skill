@@ -7,11 +7,14 @@ import { runAgent, stopAllAgents, extractJson, engineDir, quotaKey, pickWeighted
 import { balanceFactors, balanceOptions } from './balance.mjs';
 import { loadQuota, refreshQuota, saveObservation } from './quota.mjs';
 import { attemptSummary } from './digest.mjs';
-import { loadWorkflow, parseTasks, blocks } from './workflows.mjs';
+import { loadWorkflow, normalizeWorkflow, parseTasks, blocks } from './workflows.mjs';
 import { RunState, notify } from './state.mjs';
 import { knowledgeForBrief } from './knowledge.mjs';
+import { childEnv } from './util.mjs';
 const sleep=(ms)=>new Promise((r)=>setTimeout(r,ms));
 const get=(o,p)=>String(p).split('.').reduce((v,k)=>v?.[k],o);
+// A short, ref-safe slug of a task's first words: "[P] Add the login form" -> "add-the-login-form".
+const slug=(text)=>text.replace(/\[[^\]]*\]/g,' ').toLowerCase().replace(/[^a-z0-9]+/g,'-').split('-').filter(Boolean).slice(0,5).join('-').slice(0,40).replace(/-+$/,'');
 class Halt extends Error {}
 class Runtime {
   constructor(root,run,cfg) {
@@ -59,6 +62,8 @@ class Runtime {
       const scrub=(v)=>typeof v==='string'?this.agents.reduce((t,a)=>[a.name,a.cli,a.model].filter(Boolean).reduce((t,n)=>t.replace(new RegExp('(?<![\\w-])'+n.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'(?![\\w-])','g'),'[anonymous]'),t),v):Array.isArray(v)?v.map(scrub):v && typeof v==='object'?Object.fromEntries(Object.entries(v).filter(([k])=>!['agent','cli','model','vendor','entry'].includes(k)).map(([k,x])=>[k,scrub(x)])):v;
       visible=Object.fromEntries(Object.entries(visible).map(([id,v])=>[id,scrub(v?.items?{items:v.items.filter((_,i)=>this.origins[id]?.[i]?this.origins[id][i]!==b.cli:i!==b.peerIndex).map((x,i)=>({label:`Peer ${i+1}`,output:x}))}:v)]));
     }
+    // The values are part of every brief for this step, including engine-written ones.
+    if(b.choices)text+=`\n\nChoose one path. Return JSON whose "${b.choices.field}" field is exactly one of: ${b.choices.values.map((v)=>JSON.stringify(v)).join(', ')}.`;
     return text+`\n\nInputs: ${JSON.stringify(visible)}\n\nQuestions already answered: ${JSON.stringify(this.s.decisions)}\n\nUser directions (newest wins): ${JSON.stringify(this.s.directions)}\n\nMachine notes for this CLI (advice): ${knowledgeForBrief(b.cli,this.cfg.knowledgeObservedLimit ?? 10)}\n${extra}`;
   }
   ask(origin,questions) {
@@ -106,6 +111,8 @@ class Runtime {
     g.git(wt,['clean','-fdqx','--','.orchestra']);
   }
   topTier() {return Math.max(...this.agents.map((a)=>a.tier));}
+  // Work branches sit next to the run branch: orchestra/<run>.<step>.<part>, e.g. orchestra/<run>.execute.T001-add-login-form.
+  branchFor(key,part) {return `${this.s.branch}.${key.split('/').join('.')}.${part}`;}
   async strong(purpose,key,wt,input) {
     const e=await this.isolated({access:'read',tier:this.topTier(),purpose,role:purpose,
       engineText:readFileSync(join(engineDir,`templates/${purpose}.md`),'utf8')+'\n\n'+input},key,g.headSha(wt));
@@ -177,6 +184,10 @@ class Runtime {
         notify('Orchestra: agent could not start',`${agent.name}: ${res.startup.what}. Fix: ${res.startup.fix}`);this.save();continue;
       }
       if(b.access!=='write' && dirty) {res.status='failed';res.error='read-only call changed files';}
+      // A route is taken only from a listed value; anything else is a failed attempt, never a guess.
+      if(res.status==='completed' && b.choices && !output.questions?.length && !b.choices.values.includes(get(output,b.choices.field))) {
+        res.status='failed';res.error=`output field ${b.choices.field} must be one of ${b.choices.values.join(', ')}`;
+      }
       if(res.status==='completed' && output.questions?.length) {
         if(b.access==='write') {g.commitAll(wt,`orchestra: ${key} before user question`);this.recordWrite(wt,base,e,call,res.outDir);}
         await this.ask(key,output.questions);continue;
@@ -202,7 +213,7 @@ class Runtime {
     const fd=openSync(this.run.path(log),'w');let exit;
     const record={phase,command,exit:null,log,revision,status:'running'};this.s.gates.push(record);this.save();
     try { exit=await new Promise((r)=>{
-      const child=spawn(command,{shell:true,cwd:wt,stdio:['ignore',fd,fd],detached:true});
+      const child=spawn(command,{shell:true,cwd:wt,env:childEnv(),stdio:['ignore',fd,fd],detached:true});
       this.gateChild=child;let killer;const timer=setTimeout(()=>{try{process.kill(-child.pid,'SIGTERM');}catch{}
         killer=setTimeout(()=>{try{process.kill(-child.pid,'SIGKILL');}catch{}},1000);
       },parseDuration(this.cfg.gateTimeout) ?? 1200000);
@@ -249,7 +260,7 @@ class Runtime {
     for(let i=0;i<(b.count ?? 2);i++) {
       const child=`${key}/${i}`, done=this.s.steps[child];
       const agent=done?.status==='completed' ? null : await this.choose(b,new Set(reservations?.values() ?? []),(a)=>reservations?.set(child,a.cli));
-      jobs.push({agent,key:child,branch:`${this.s.branch}-parallel-${key.replace(/[^\w-]/g,'-')}-${i}`,wt:join(this.wtRoot,`${key.replace(/[^\w-]/g,'-')}-${i}`)});
+      jobs.push({agent,key:child,branch:this.branchFor(key,`agent-${i+1}`),wt:join(this.wtRoot,`${key.replace(/[^\w-]/g,'-')}-${i}`)});
     }
     const results=await Promise.allSettled(jobs.map(async(j)=>{
       if(this.s.steps[j.key]?.status==='completed')return this.s.steps[j.key];
@@ -267,8 +278,10 @@ class Runtime {
       this.prompt(b,'synthesis')+'\nIndependent outputs:\n'+JSON.stringify(output));
     return {items:output,synthesis};
   }
-  async lanes(b,key) {
-    const entry=this.s.steps[key] ??= {status:'running'};entry.lanes ??={};entry.phases ??=[];
+  async tasks(b,key) {
+    const entry=this.s.steps[key] ??= {status:'running'};entry.phases ??=[];
+    // Runs recorded before the rename keep their task branches.
+    entry.branches ??=entry.lanes ?? {};delete entry.lanes;
     if(!entry.text) {
       let input=this.interpolate(b.taskFile) || this.s.options?.taskFile;
       if(!input) {
@@ -302,13 +315,13 @@ class Runtime {
         for(let offset=0;offset<group.length;offset+=this.cfg.fanout.executors) {
           const batch=group.slice(offset,offset+this.cfg.fanout.executors), base=g.headSha(this.wt);
           const runTask=async(t,redo=false)=>{
-            const lane=entry.lanes[t.id] ??= {branch:`${this.s.branch}-${key.replace(/[^\w-]/g,'-')}-${t.id}`,base};
-            if(lane.merged)return;
+            const work=entry.branches[t.id] ??= {branch:this.branchFor(key,[t.id,slug(t.text)].filter(Boolean).join('-')),base};
+            if(work.merged)return;
             if(redo) {
-              if(!lane.redo){lane.redo=true;lane.base=g.headSha(this.wt);g.deleteBranch(this.root,lane.branch);this.save();}
+              if(!work.redo){work.redo=true;work.base=g.headSha(this.wt);g.deleteBranch(this.root,work.branch);this.save();}
             }
-            const taskKey=`${key}/${t.id}${lane.redo?'/redo':''}`;
-            const e=await this.isolated({...b,tier:b.tier ?? 1,phaseBrief:entry.briefs[phase]?.[t.id],role:'executor',access:'write'},taskKey,lane.base,`\nSUBTASK:\n${t.id} ${t.text}\n\n${lane.redo?'Redo your work on top of the merged result; preserve the changes already there.':''}`,lane.branch);
+            const taskKey=`${key}/${t.id}${work.redo?'/redo':''}`;
+            const e=await this.isolated({...b,tier:b.tier ?? 1,phaseBrief:entry.briefs[phase]?.[t.id],role:'executor',access:'write'},taskKey,work.base,`\nSUBTASK:\n${t.id} ${t.text}\n\n${work.redo?'Redo your work on top of the merged result; preserve the changes already there.':''}`,work.branch);
             let record=this.s.tasks.find((r)=>r.id===t.id);if(!record){record={id:t.id,phase,status:'skipped',commits:[]};this.s.tasks.push(record);}
             Object.assign(record,{status:'skipped',agent:e.agent,commits:e.commits,attempts:Object.entries(this.s.steps).filter(([k])=>k===`${key}/${t.id}` || k.startsWith(`${key}/${t.id}/`)).reduce((n,[,e])=>n+(e.attempts?.filter((c)=>!c.purpose).length ?? 0),0)});this.save();
           };
@@ -318,31 +331,31 @@ class Runtime {
             this.save();throw failed.reason;
           }
           for(const task of batch) {
-            const lane=entry.lanes[task.id];if(lane.merged)continue;
+            const work=entry.branches[task.id];if(work.merged)continue;
             // Detect a merge committed just before a crash but not yet checkpointed.
-            let merged=g.git(this.wt,['merge-base','--is-ancestor',lane.branch,'HEAD'],{allowFail:true}).ok;
-            if(!merged)merged=g.merge(this.wt,lane.branch,`orchestra: merge ${task.id}`).ok;
+            let merged=g.git(this.wt,['merge-base','--is-ancestor',work.branch,'HEAD'],{allowFail:true}).ok;
+            if(!merged)merged=g.merge(this.wt,work.branch,`orchestra: merge ${task.id}`).ok;
             if(!merged) {
               g.abortMerge(this.wt);
-              if(!lane.redo) {await runTask(task,true);merged=g.merge(this.wt,lane.branch,`orchestra: merge ${task.id} redone`).ok;}
-              if(!merged) {g.abortMerge(this.wt);await this.ask(`${key}/${task.id}/conflict`,[`Lane ${task.id} conflicts again. Resolve branch ${lane.branch} on top of ${this.s.branch}, then answer to retry the merge.`]);
-                merged=g.merge(this.wt,lane.branch,`orchestra: merge ${task.id} after user answer`).ok;
-                if(!merged){g.abortMerge(this.wt);throw new Error(`lane ${task.id} still conflicts`);}}
+              if(!work.redo) {await runTask(task,true);merged=g.merge(this.wt,work.branch,`orchestra: merge ${task.id} redone`).ok;}
+              if(!merged) {g.abortMerge(this.wt);await this.ask(`${key}/${task.id}/conflict`,[`Task ${task.id} conflicts again. Resolve branch ${work.branch} on top of ${this.s.branch}, then answer to retry the merge.`]);
+                merged=g.merge(this.wt,work.branch,`orchestra: merge ${task.id} after user answer`).ok;
+                if(!merged){g.abortMerge(this.wt);throw new Error(`task ${task.id} still conflicts`);}}
             }
-            lane.merged=true;this.save();
+            work.merged=true;this.save();
           }
         }
       }
       for(;;) {
         for(const t of todo) {
-          const lane=entry.lanes[t.id], taskKey=`${key}/${t.id}${lane.redo?'/redo':''}`;
+          const work=entry.branches[t.id], taskKey=`${key}/${t.id}${work.redo?'/redo':''}`;
           if(this.s.steps[taskKey].pendingFailure)await this.job({...b,role:'executor',access:'write'},taskKey,this.wt);
         }
         try {await this.gates(`${key}-phase${phase}`,phase);break;}
         catch(error) {
           this.check();
           for(const t of todo) {
-            const lane=entry.lanes[t.id], taskKey=`${key}/${t.id}${lane.redo?'/redo':''}`, e=this.s.steps[taskKey];
+            const work=entry.branches[t.id], taskKey=`${key}/${t.id}${work.redo?'/redo':''}`, e=this.s.steps[taskKey];
             const worker={...b,role:'executor',access:'write'};
             e.validationBase=g.headSha(this.wt);
             await this.retryFailure(worker,taskKey,this.wt,e,this.gateDigest(error));
@@ -372,45 +385,52 @@ class Runtime {
     else if(kind==='loop') {e.writers ??=this.lastWriters;this.lastWriters=e.writers;}
     else if(kind!=='gate')this.lastWriters=null;
   }
-  async sequence(steps,prefix='') {
-    for(const step of steps) {
-      this.check();this.steering();const key=prefix+step.id,k=blocks.find((k)=>step[k]),b=step[k];
-      let e=this.s.steps[key];
-      if(e?.status==='completed') {
-        this.trackWriters(k,b,key,e);if(k==='agent')this.materialize(b,e.output);
-        this.outputs[step.id]=e.output;this.origins[step.id]=e.peers;this.previous=step.id;continue;
-      }
-      if(k==='agent' && b.unless && this.interpolate(b.unless)) {this.s.steps[key]={status:'completed',output:{skipped:true,taskFile:this.interpolate(b.unless)}};this.outputs[step.id]=this.s.steps[key].output;this.previous=step.id;this.save();continue;}
-      if(!e)e=this.s.steps[key]={status:'running'};
-      let output;
-      if(k==='agent') {
-        e=await this.job(b,key,this.wt);output=e.output;
-        this.materialize(b,output);
-      } else if(k==='parallel')output=await this.parallel(b,key);
-      else if(k==='ask')output=await this.ask(key,b.questions?.map((q)=>this.interpolate(q)) ?? [this.interpolate(readFileSync(join(this.workflow.dir,b.prompt),'utf8'))]);
-      else if(k==='gate')output=await this.checkedGates(()=>this.gate(this.interpolate(b.command),key),this.lastWriters);
-      else if(k==='lanes')output=await this.lanes(b,key);
-      else if(k==='loop') {
-        let matched=false;
-        for(const child of b.steps){const prior=this.s.steps[`${key}/${(e.iteration ?? 0)-1}/${child.id}`];if(prior?.status==='completed'){this.outputs[child.id]=prior.output;this.origins[child.id]=prior.peers;}}
-        for(let i=e.iteration ?? 0;i<b.max;i++) {
-          const outerCycle=this.cycle;this.cycle=i+1;await this.sequence(b.steps,`${key}/${i}/`);this.cycle=outerCycle;e.iteration=i;this.save();
-          const out=this.s.steps[`${key}/${i}/${b.until.step}`]?.output;
-          if(get(out,b.until.field)===b.until.equals){output=out;matched=true;e.iteration=i+1;break;}
-          e.iteration=i+1;this.save();
-        }
-        if(!matched){e.status='exhausted';this.save();throw new Error(`loop ${key} reached max`);}
-      }
-      this.trackWriters(k,b,key,e);
-      e.status='completed';e.output=output;this.outputs[step.id]=output;this.origins[step.id]=e.peers;this.previous=step.id;this.save();
+  restore(id,e) {this.outputs[id]=e.output;this.origins[id]=e.peers;this.previous=id;}
+  async runStep(step,key) {
+    this.check();this.steering();const k=blocks.find((k)=>step[k]),b=step[k];
+    let e=this.s.steps[key];
+    if(e?.status==='completed') {
+      this.trackWriters(k,b,key,e);if(k==='agent')this.materialize(b,e.output);
+      this.restore(step.id,e);return;
     }
+    if(k==='agent' && b.unless && this.interpolate(b.unless)) {this.s.steps[key]={status:'completed',output:{skipped:true,taskFile:this.interpolate(b.unless)}};this.restore(step.id,this.s.steps[key]);this.save();return;}
+    if(!e)e=this.s.steps[key]={status:'running'};
+    let output;
+    if(k==='agent') {
+      e=await this.job(b,key,this.wt);output=e.output;
+      this.materialize(b,output);
+    } else if(k==='parallel')output=await this.parallel(b,key);
+    else if(k==='ask')output=await this.ask(key,b.questions?.map((q)=>this.interpolate(q)) ?? [this.interpolate(readFileSync(join(this.workflow.dir,b.prompt),'utf8'))]);
+    else if(k==='gate')output=await this.checkedGates(()=>this.gate(this.interpolate(b.command),key),this.lastWriters);
+    else if(k==='tasks')output=await this.tasks(b,key);
+    this.complete(k,b,key,e,step.id,output);
+  }
+  complete(k,b,key,e,id,output) {
+    this.trackWriters(k,b,key,e);
+    e.status='completed';e.output=output;this.restore(id,e);this.save();
+  }
+  // Returns the iteration to run; a finished loop restores its output and is passed over.
+  enterLoop(step,key) {
+    this.check();const b=step.loop;let e=this.s.steps[key];
+    if(e?.status==='completed') {this.trackWriters('loop',b,key,e);this.restore(step.id,e);return e.iteration;}
+    if(!e)e=this.s.steps[key]={status:'running'};
+    for(const child of b.steps){const prior=this.s.steps[`${key}/${(e.iteration ?? 0)-1}/${child.id}`];if(prior?.status==='completed'){this.outputs[child.id]=prior.output;this.origins[child.id]=prior.peers;}}
+    this.save();return e.iteration ?? 0;
+  }
+  // After one iteration: completes the loop on its structured field, or returns the next iteration.
+  checkLoop(step,key,i) {
+    const b=step.loop,e=this.s.steps[key];e.iteration=i;this.save();
+    const out=this.s.steps[`${key}/${i}/${b.until.step}`]?.output;
+    e.iteration=i+1;
+    if(get(out,b.until.field)===b.until.equals){this.complete('loop',b,key,e,step.id,out);return i;}
+    if(e.iteration>=b.max){e.status='exhausted';this.save();throw new Error(`loop ${key} reached max`);}
+    this.save();return e.iteration;
   }
   async execute(resume) {
     this.outputs={};this.origins={};
-    this.workflow=this.s.workflowData ?? (this.s.options?.workflow ? loadWorkflow(this.root,this.s.options.workflow) :
-      {workflow:1,dir:this.run.dir,budget:{calls:32},steps:[{id:'task',agent:{prompt:'direct.md',tier:this.s.options?.tier ?? 2,access:this.s.options?.access ?? 'write'}}]});
+    if(!this.s.workflowData && !this.s.options?.workflow)throw new Error('a run needs a workflow: orchestra run <workflow> "<task>"');
+    this.workflow=normalizeWorkflow(this.s.workflowData ?? loadWorkflow(this.root,this.s.options.workflow));
     this.s.workflowData=this.workflow;
-    if(!this.s.options?.workflow)writeFileSync(this.run.path('direct.md'),this.s.task);
     this.onSignal=()=>{this.stopping=true;stopAllAgents();if(this.gateChild){try{process.kill(-this.gateChild.pid,'SIGTERM');}catch{}}};
     process.on('SIGTERM',this.onSignal);process.on('SIGINT',this.onSignal);
     try {
@@ -421,7 +441,9 @@ class Runtime {
       else g.addBranchWorktree(this.root,this.wt,this.s.branch,this.s.base);
       this.s.pid=process.pid;this.s.status='running';this.save();
       await refreshQuota(this.root,this.agents);
-      await this.sequence(this.workflow.steps);
+      // Loaded here so that commands which only read state never pay for importing LangGraph.
+      const { compileWorkflow } = await import('./graph.mjs');
+      await compileWorkflow(this.workflow,this).invoke();
       if(!this.s.finalGatesPassed) {
         if(this.s.phaseGateRevision!==g.headSha(this.wt))await this.checkedGates(()=>this.gates('final'),this.lastWriters);
         this.s.finalGatesPassed=true;
@@ -434,7 +456,7 @@ class Runtime {
       this.save();writeFileSync(this.run.path('FINAL.md'),this.s.final+'\n');
       process.off('SIGTERM',this.onSignal);process.off('SIGINT',this.onSignal);
       if(existsSync(this.wtRoot))for(const d of readdirSync(this.wtRoot))g.removeWorktree(this.root,join(this.wtRoot,d));
-      if(this.s.status==='completed')for(const branch of g.branchesWithPrefix(this.root,`${this.s.branch}-`))g.deleteBranch(this.root,branch);
+      if(this.s.status==='completed')for(const sep of ['.','-'])for(const branch of g.branchesWithPrefix(this.root,this.s.branch+sep))g.deleteBranch(this.root,branch);
       notify('Orchestra',this.s.final);
     }
   }

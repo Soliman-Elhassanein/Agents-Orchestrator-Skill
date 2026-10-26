@@ -4,7 +4,7 @@
 
 Orchestra is a Node CLI that coordinates your agent CLIs for code, research, review and
 deliberation. Strong models plan and synthesize. Cheap models do the bulk of the work.
-This is version **2.2.0**, with no npm dependencies.
+This is version **3.0.0**. Workflows run on LangGraph, its only npm dependency.
 
 The five promises in [CONSTITUTION.md](CONSTITUTION.md):
 
@@ -25,21 +25,33 @@ Orchestra is not a judge: it reports facts about calls, commits, gate exits and 
 ## How it works
 
 ```text
-Your agent CLI / you
-        |
-        v
-Orchestra core
+You
+  |  ^
+  v  |  briefs and questions
+Your agent CLI: the communicator
+  picks a workflow, relays questions and answers
+  |  ^
+  |  |  events: questions, done, failed, waiting
+  v  |
+Orchestra core          orchestra run <workflow> "<task>"
   queue, tiers, quota balancing, questions,
   idle waiting, resume, records
         |
         v
+Workflow graph (LangGraph)
+  steps are nodes; order and routes are edges
+        |
+        v
 Six blocks
-  agent, parallel, ask, gate, loop, lanes
+  agent, parallel, ask, gate, loop, tasks
         |
         v
 Workflows
   data files + prompts + optional gate scripts
 ```
+
+Every run is a workflow. Orchestra ships one built-in workflow, a single agent doing the
+task; you write any others as data files.
 
 Workflows describe themselves. `orchestra workflow list` shows every workflow available to
 you, built in, installed for your user or in your project, with what it does, what to give
@@ -48,7 +60,7 @@ writing code, deliberating and creating new workflows. Every call has its own se
 
 ## Requirements
 
-- Node 18 or newer.
+- Node 20 or newer.
 - Git with `user.name` and `user.email` configured. Your project needs at least one commit.
 - At least one agent CLI that you installed and logged in to yourself.
   Orchestra does not install or authenticate those tools.
@@ -74,6 +86,9 @@ git clone https://github.com/Soliman-Elhassanein/Agents-Orchestrator-Skill.git o
 cd orchestra
 npm install -g .
 ```
+
+npm installs LangGraph at the exact versions in `package-lock.json`. `orchestra init` links
+your project's engine copy to these dependencies; run it again after updating Orchestra.
 
 Install the single [Agent Skills](https://agentskills.io/specification) file for your agent:
 
@@ -111,7 +126,14 @@ Repeat it for each CLI you plan to use.
 ### 2. Run one task
 
 ```sh
-orchestra run "Create overview.md with a short guide to this repository's main folders."
+orchestra workflow list
+```
+
+The list shows each workflow's name, what it does and an example command. The built-in one
+has a single agent do the task. Give its name and your task:
+
+```sh
+orchestra run <workflow> "Create overview.md with a short guide to this repository's main folders."
 ```
 
 `run` starts a background worker, prints the run ID and watches until an event needs attention
@@ -183,7 +205,7 @@ diagnosis and revised brief before retrying on the original tier. Escalation fol
 A write call that changes nothing is `no-changes`; it gets the same diagnosis and bounded retries, and cannot
 complete or unblock dependent work without a real change.
 
-`fanout.executors` bounds lane concurrency. `executorRetries` limits retries;
+`fanout.executors` bounds how many tasks run at once. `executorRetries` limits retries;
 `agentTimeout` and `gateTimeout` limit how long calls and gates may run. `gates` contains shell
 commands; repeated `--gate` arguments override them for that run.
 
@@ -209,14 +231,12 @@ never reaches a limit.
 
 ### Workflows and task lists
 
-`orchestra run "task"` is one write agent job at tier 2; `--tier` changes its tier.
-Use `--access read` for an answer or research without file edits. Direct tasks use the same
-queue, quota, questions, resume and records as workflows.
-`orchestra run <workflow> "task"` selects a workflow.
+Every run names a workflow: `orchestra run <workflow> "task"`. Without one, `run` stops and
+points to `orchestra workflow list`.
 
-The `lanes` block runs a task list. The engine reads an explicit task file or
-asks a highest-tier agent to write one. It prepares briefs for cheap workers, then runs
-lanes, merges and runs phase gates. Only executed tasks whose gates
+The `tasks` block runs a task list. The engine reads an explicit task file or
+asks a highest-tier agent to write one. It prepares briefs for cheap workers, runs the tasks
+on their own branches, merges them and runs phase gates. Only executed tasks whose gates
 passed are ticked. Generated lists stay in the run folder. Project task files are ticked
 on the run branch and reach your checkout when landed.
 
@@ -230,20 +250,25 @@ on the run branch and reach your checkout when landed.
 | `[x]` | Executed, merged and gates passed; you still decide quality. |
 
 A `[P]` marker promises different files and no shared state. Orchestra trusts that promise.
-Existing ticks are skipped. `fanout.executors` limits lane concurrency.
+Existing ticks are skipped. `fanout.executors` limits how many tasks run at once.
 
 Workflows are versioned JSON with six blocks: `agent`, `parallel`, `ask`, `gate`, `loop` and
-`lanes`. Project workflows override user workflows, which override built-ins. Each workflow
-has a finite call budget. Resume skips completed steps and continues retained lane branches.
-A lane merge conflict causes one redo on the merged work; a second conflict asks you.
+`tasks`. Orchestra compiles each one into a LangGraph state graph: steps are nodes, their
+order is the edges. An `agent` step can return one of a fixed list of values (`choices`) and
+later steps run only `when` it chose theirs, so a run can branch but only along paths the
+workflow names. Project workflows override user workflows, which override built-ins. Each
+workflow has a finite call budget. Resume skips completed steps and continues retained task
+branches. A task's merge conflict causes one redo on the merged work; a second conflict asks
+you. Branches are named after the run, step and task, such as
+`orchestra/<run-id>.execute.T001-add-login-form`.
 
 The engine's strong calls are read-only and text-only, selected with the same quota balancing
 as workers at the highest configured tier. If that tier has no quota, the run waits.
 Their prompts ship with the engine and workflows cannot disable them. Budget for:
 
-- A cheap single write (including a bare `run`): one brief plus one worker call. A worker
+- A cheap single write (including the built-in workflow): one brief plus one worker call. A worker
   already on the highest tier needs no separate brief. Read calls need no brief.
-- Lanes: one plan if no task file, one brief call per phase containing all that phase's
+- Tasks: one plan if no task file, one brief call per phase containing all that phase's
   task briefs when workers are below the highest tier, plus the task calls.
 - Parallel: its child calls plus one synthesis. Write children also receive briefs when needed.
 - Each failed write being retried: one diagnosis plus the retry. Attributable gate failures
@@ -293,9 +318,11 @@ observations). Notes are advice; recording makes no additional model calls.
 
 ## Using it from your agent
 
-The [standard skill](skills/orchestra/SKILL.md) compares your job with available workflows.
-It chooses a fitting workflow or runs the task as given. If the job seems too simple and
-one agent could do it directly, the skill explains that and asks you. If you insist, it runs
+Your agent CLI is the communicator: you talk to it, it starts workflows and relays
+Orchestra's questions to you. The [standard skill](skills/orchestra/SKILL.md) compares your
+job with available workflows. It chooses a fitting workflow, or the built-in single-agent
+workflow when none fits. If the job seems too simple and one agent could do it directly,
+the skill explains that and asks you. If you insist, it runs
 through Orchestra. An answer already given is honored without asking again.
 `init` installs no per-CLI commands and does not depend on the skill.
 
@@ -343,7 +370,7 @@ scripts. Each includes a generated `workflow.drawio` that opens in draw.io; rege
 `orchestra workflow diagram <name|path-to-workflow.json>` after changing the JSON. Every pack
 has a required `description` saying what it does, what to give it and what it returns;
 `orchestra workflow list` shows each available workflow with its description.
-[Workflow format v2](docs/workflows.md) documents the six blocks and annotated
+[Workflow format v3](docs/workflows.md) documents the six blocks, routing and annotated
 examples. Put cheap bulk calls at tier 1, strong proposals at tier 3, a finite call budget
 on every workflow and a maximum on every loop. Keep workflow files as data.
 
@@ -355,8 +382,6 @@ orchestra workflow run my-workflow --dry
 orchestra run my-workflow "The job"
 ```
 
-To draft a pack interactively instead, use the built-in authoring workflow shown by
-`orchestra workflow list`; it requires a description and saves only after your approval.
 A pack may include a `README.md` guide; `workflow list` shows its path.
 
 `workflow add` also accepts a Git URL or `--user` for installation across projects. Existing
@@ -369,11 +394,11 @@ project pack, explicitly track only `.orchestra/workflows/<name>/`.
 
 ```text
 init [--force]
-run [workflow] [<task>] [--task-file <file>] [--tier N] [--access read|write] [--gate <cmd>]
+run <workflow> [<task>] [--task-file <file>] [--gate <cmd>]
     [--detach|--foreground] [--every <minutes>] [--stuck-after <minutes>]
 adapter test <name>
 workflow list [--json] | check <file> | diagram <name|file> [--out <file>] | run <name> --dry | add <git-url|path> [--user]
-queue [add <task> | edit <id> <task> | rm <id> | move <id> <position> | hold | resume]
+queue [add <workflow> <task> | edit <id> <task> | rm <id> | move <id> <position> | hold | resume]
 status [run-id] [--json]        list
 answer [run-id] "1. … 2. …" | answer [run-id] --file <file>
 steer [run-id] "direction" | steer [run-id] --file <file>
@@ -384,7 +409,7 @@ knowledge [add <text> | approve <id> | rm <id>] [--cli <name>] [--json]
 land [run-id] <target-branch>
 ```
 
-Prefix each command above with `orchestra`. A run needs task text or `--task-file`.
+Prefix each command above with `orchestra`. A run needs a workflow and task text or `--task-file`.
 `knowledge add` requires `--cli <name>`.
 
 A failed run holds the queue unless `queue.holdOnFailure` is false. By default queued tasks
@@ -395,9 +420,9 @@ applies at the next boundary. `watch`, `check` and quota readers make no model c
 ## Development
 
 `npm test` is the delivery gate. It uses a test-only mock adapter, real Git, worktrees and
-processes. It covers adapters, quota selection, retries, the six blocks, queue and watching,
-questions, resume, merges, gates, task ticking, workflow tools, evidence checks,
-diagrams and machine knowledge. It makes no real model calls.
+processes. It covers adapters, quota selection, retries, the six blocks, routing, the
+workflow graph, queue and watching, questions, resume, merges, branch names, gates, task
+ticking, workflow tools, diagrams and machine knowledge. It makes no real model calls.
 Contribution rules are in [AGENTS.md](AGENTS.md).
 
 ## Credits

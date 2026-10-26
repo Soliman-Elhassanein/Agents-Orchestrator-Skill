@@ -95,14 +95,17 @@ const orch = (dir, args, env) => sh(dir, process.execPath, [join(dir, ".orchestr
 const state = (dir) => JSON.parse(orch(dir, ["status", "--json"]));
 const report=(dir)=>JSON.parse(readFileSync(join(dir,'.orchestra/runs',state(dir).id,'run.json'),'utf8'));
 const commit=(dir,msg='fixture')=>{sh(dir,'git',['add','.']);sh(dir,'git',['commit','-qm',msg]);};
-function workflow(dir,name,steps,budget=16,prompts={}) {
+function workflow(dir,name,steps,budget=16,prompts={},version=1) {
   const path=join(dir,'.orchestra/workflows',name);mkdirSync(path,{recursive:true});
-  writeFileSync(join(path,'workflow.json'),JSON.stringify({workflow:1,budget:{calls:budget},steps}));
+  writeFileSync(join(path,'workflow.json'),JSON.stringify(version===1?{workflow:1,budget:{calls:budget},steps}:{workflow:version,description:'Test workflow.',budget:{calls:budget},steps}));
   writeFileSync(join(path,'read.md'),'Read the project and return JSON with a stop boolean.');
   writeFileSync(join(path,'write.md'),'Make the requested change.');
   for(const [name,text]of Object.entries(prompts))writeFileSync(join(path,name),text);
   return path;
 }
+// A task-list workflow and a read-only single agent, as project fixtures.
+const codeWorkflow=(dir)=>workflow(dir,'code',[{id:'execute',tasks:{taskFile:'{{taskFile}}',tier:1,access:'write'}}],128,{},3);
+const reader=(dir)=>workflow(dir,'reader',[{id:'task',agent:{prompt:'read.md',access:'read'}}],32);
 function taskFile(dir,text) {writeFileSync(join(dir,'tasks.md'),text);commit(dir);return join(dir,'tasks.md');}
 // Validate the XML subset emitted by the renderer, including graph IDs and references.
 function drawingCells(xml) {
@@ -157,7 +160,7 @@ const tests={
     assert.equal(orchRaw(dir,['workflow','diagram','drawing','--out']).code,1);
   },
   'diagrams: all built-in drawings are current and parse as XML'() {
-    for(const name of ['code','council','council-compare','council-learn','council-review','new-workflow']) {
+    for(const name of readdirSync(join(REPO,'workflows'))) {
       const folder=join(REPO,'workflows',name),file=join(folder,'workflow.json'),xml=readFileSync(join(folder,'workflow.drawio'),'utf8');
       assert.equal(xml,workflowDiagram(JSON.parse(readFileSync(file))));drawingCells(xml);
       assert.match(sh(REPO,process.execPath,[SOURCE_BIN,'workflow','check',file]),/valid/);
@@ -179,7 +182,7 @@ const tests={
     for (const withWorkflow of [false,true]) {
       const dir=project();
       if(withWorkflow)workflow(dir,'sample',[{id:'read',agent:{prompt:'read.md',access:'read'}}]);
-      const result=orchRaw(dir,withWorkflow?['run','sample','read this']:['run','read this','--access','read']);
+      const result=orchRaw(dir,withWorkflow?['run','sample','read this']:['run','solo','write this']);
       assert.equal(result.code,0,result.err);assert.match(result.out,/EVENT finished/);
       const s=state(dir);assert.equal(s.status,'completed');assert.ok(result.out.includes(`Run ${s.id}`));
       assert.match(result.out,/ended \*\*completed\*\*/);
@@ -188,7 +191,7 @@ const tests={
   },
   async 'run watches: questions are reported once and a later watch waits for answer completion'() {
     const dir=project();
-    const first=orchRaw(dir,['run','ask me'],{MOCK_QUESTIONS:'1'});
+    const first=orchRaw(dir,['run','solo','ask me'],{MOCK_QUESTIONS:'1'});
     assert.equal(first.code,0,first.err);assert.match(first.out,/EVENT questions/);
     const s=state(dir);assert.equal(s.status,'awaiting_user');assert.ok(first.out.includes(s.id));
     assert.equal(report(dir).tokens.calls,2);
@@ -201,43 +204,43 @@ const tests={
     assert.doesNotMatch(next.out,/EVENT questions/);assert.equal(report(dir).tokens.calls,3);
   },
   'run watches: detach returns before the mock completes and prints the eventual run id'() {
-    const dir=project();const result=orchRaw(dir,['run','slow job','--detach'],{MOCK_DELAY:'1800'});
+    const dir=project();const result=orchRaw(dir,['run','solo','slow job','--detach'],{MOCK_DELAY:'1800'});
     assert.equal(result.code,0);assert.doesNotMatch(result.out,/EVENT/);
     const item=queueOf(dir).items[0];assert.ok(result.out.includes(`Run ${item.runId}`));
     assert.notEqual(item.status,'completed');
     waitFor(()=>runOf(dir,item.id).status==='completed','detached completion');
     assert.equal(state(dir).id,item.runId);
     orch(dir,['queue','hold']);
-    const held=orchRaw(dir,['run','queued job','--detach']);
+    const held=orchRaw(dir,['run','solo','queued job','--detach']);
     assert.equal(held.code,0);assert.ok(held.out.includes(`Run ${queueOf(dir).items[1].runId}`));
   },
   'run watches: failure and quota events return zero without idle model calls'() {
-    const failed=project();const result=orchRaw(failed,['run','do work','--gate','exit 7']);
+    const failed=project();const result=orchRaw(failed,['run','solo','do work','--gate','exit 7']);
     assert.equal(result.code,0);assert.match(result.out,/EVENT finished/);assert.match(result.out,/ended \*\*failed\*\*/);
     const quota=project({agents:{only:{cli:'mock',model:'one',tier:1}}});
-    const waiting=orchRaw(quota,['run','higher tier needed']);
+    const waiting=orchRaw(quota,['run','solo','higher tier needed']);
     assert.equal(waiting.code,0);assert.match(waiting.out,/EVENT waiting/);assert.ok(waiting.out.includes(state(quota).id));
     assert.equal(report(quota).tokens.calls,0);orch(quota,['stop']);
     waitFor(()=>state(quota).status==='stopped','stop waiting run');
   },
   'run watches: check-in and stuck flags reuse watcher options and config defaults'() {
     const progress=project({communicatorUpdateMinutes:0.003,stuckAfterMinutes:0});
-    const tick=orchRaw(progress,['run','slow task'],{MOCK_DELAY:'1800'});
+    const tick=orchRaw(progress,['run','solo','slow task'],{MOCK_DELAY:'1800'});
     assert.equal(tick.code,0);assert.match(tick.out,/EVENT progress/);
     waitFor(()=>state(progress).status==='completed','check-in completion');
     const stuck=project({communicatorUpdateMinutes:0.001,stuckAfterMinutes:0});
-    const quiet=orchRaw(stuck,['run','slow task','--every','0','--stuck-after','0.004'],{MOCK_DELAY:'1800'});
+    const quiet=orchRaw(stuck,['run','solo','slow task','--every','0','--stuck-after','0.004'],{MOCK_DELAY:'1800'});
     assert.equal(quiet.code,0);assert.match(quiet.out,/EVENT stuck/);
     waitFor(()=>state(stuck).status==='completed','stuck completion');
   },
   async 'run watches: stop is a handled event and a queued run stays attached to its own id'() {
     const dir=project();
-    orch(dir,['run','first job','--detach'],{MOCK_DELAY:'1200'});
-    const following=orchAsync(dir,['run','second job','--every','0']);
+    orch(dir,['run','solo','first job','--detach'],{MOCK_DELAY:'1200'});
+    const following=orchAsync(dir,['run','solo','second job','--every','0']);
     const result=await following;const second=queueOf(dir).items[1];
     assert.equal(result.code,0);assert.match(result.out,/EVENT finished/);
     assert.ok(result.out.includes(`Run ${second.runId} ended **completed**`));
-    const stopped=project();const watching=orchAsync(stopped,['run','slow task','--every','0'],{MOCK_DELAY:'1500'});
+    const stopped=project();const watching=orchAsync(stopped,['run','solo','slow task','--every','0'],{MOCK_DELAY:'1500'});
     waitFor(()=>state(stopped).status==='running','running before stop');orch(stopped,['stop']);
     const event=await watching;assert.equal(event.code,0);assert.match(event.out,/ended \*\*stopped\*\*/);
   },
@@ -259,7 +262,7 @@ const tests={
   },
   'step 3: startup handover stays at the same tier, records exact fixes, never diagnoses startup failures'() {
     const agents={bad:{cli:'mock',model:'broken',tier:2,weight:100000},good:{cli:'mock',model:'good',tier:2,weight:0.00001},strong:{cli:'mock',model:'strong',tier:3}};
-    const dir=project({agents});orch(dir,['run','one task','--foreground'],{MOCK_STARTUP:'broken'});
+    const dir=project({agents});orch(dir,['run','solo','one task','--foreground'],{MOCK_STARTUP:'broken'});
     const s=state(dir),r=report(dir);assert.equal(s.status,'completed',s.error);assert.equal(r.tokens.calls,3);
     assert.equal(r.calls[1].status,'startup-failed');assert.equal(r.calls[2].entry,'good');
     assert.equal(r.calls.filter(c=>c.purpose==='diagnosis').length,0);assert.equal(s.steps.task.failures,0);assert.match(s.unavailable.bad.fix,/Repair/);
@@ -269,14 +272,14 @@ const tests={
   'step 3: model tiers use quota weights, go up when empty and never down'() {
     const dir=project();writeFileSync(join(dir,'.orchestra/quota.json'),JSON.stringify({providers:{mock:{limitReached:'limit',observedAt:new Date().toISOString(),windows:[]},up:{windows:[{name:'weekly',usedPercent:10}]}}}));
     const file=join(dir,'.orchestra/config.json'),cfg=JSON.parse(readFileSync(file));cfg.agents.strong.quotaFrom='up';writeFileSync(file,JSON.stringify(cfg));
-    orch(dir,['run','one task','--foreground']);const r=report(dir);assert.equal(r.calls[0].entry,'strong');assert.equal(r.tokens.calls,1);
+    orch(dir,['run','solo','one task','--foreground']);const r=report(dir);assert.equal(r.calls[0].entry,'strong');assert.equal(r.tokens.calls,1);
   },
   'step 3: diagnosed retries precede escalation; incomplete usage stays explicit'() {
-    const dir=project({executorRetries:2});orch(dir,['run','one task','--foreground'],{MOCK_FAIL:'medium'});
+    const dir=project({executorRetries:2});orch(dir,['run','solo','one task','--foreground'],{MOCK_FAIL:'medium'});
     const r=report(dir);assert.deepEqual(r.calls.map((c)=>c.entry),['strong','medium','strong','medium','strong','strong']);assert.equal(r.tokens.tokens,7500);
     assert.deepEqual(r.calls.filter(c=>c.purpose).map(c=>c.purpose),['brief','diagnosis','diagnosis']);
     const brief=readFileSync(join(dir,'.orchestra/runs',state(dir).id,r.calls[3].log,'brief.md'),'utf8');assert.match(brief,/Previous attempt[\s\S]*npm test/);
-    const other=project({agents:{u:{cli:'mock',model:'unreported',tier:2}}});orch(other,['run','one task','--foreground']);assert.deepEqual(report(other).tokens,{calls:1,tokens:0,unreported:1});
+    const other=project({agents:{u:{cli:'mock',model:'unreported',tier:2}}});orch(other,['run','solo','one task','--foreground']);assert.deepEqual(report(other).tokens,{calls:1,tokens:0,unreported:1});
   },
   'step 4: six blocks, structured outputs, bounded loops and independent parallel sessions'() {
     const dir=project(),steps=[{id:'research',agent:{prompt:'read.md',tier:1}},{id:'views',parallel:{prompt:'read.md',count:2,tier:2,sees:['research']}},
@@ -313,7 +316,7 @@ const tests={
   'step 5: supplied task list runs parallel work, sequential barriers, phase gates and exact checkbox edits'() {
     const dir=project({gates:['test -f mock-output/T001.txt && test -f mock-output/T002.txt']});
     const original='# Tasks\r\nKeep this text.\r\n## Phase 1: Work\r\n- [ ] T001 [P] [X] Write one\r\n- [ ] T002 [P] Write two\r\n- [ ] T003 Wire both\r\n\r\n## Phase 2: More\r\n- [ ] T004 Add last\r\n';
-    taskFile(dir,original);orch(dir,['run','code','--task-file','tasks.md','--foreground']);const s=state(dir),r=report(dir);
+    codeWorkflow(dir);taskFile(dir,original);orch(dir,['run','code','--task-file','tasks.md','--foreground']);const s=state(dir),r=report(dir);
     assert.equal(s.status,'completed',s.error);assert.equal(r.tokens.calls,6);assert.deepEqual(r.tasks.map((t)=>t.status),['executed','executed','executed','executed']);
     const show=(f)=>sh(dir,'git',['show',`${s.branch}:${f}`]);
     assert.equal(show('tasks.md'),original.replaceAll('- [ ]','- [x]'));
@@ -323,46 +326,46 @@ const tests={
     for(const gate of r.gates){assert.equal(gate.exit,0);assert.ok(existsSync(join(dir,'.orchestra/runs',s.id,gate.log)));assert.ok(gate.revision);}
   },
   'step 5: generated task list uses a tier-3 call then cheap lanes'() {
-    const dir=project();orch(dir,['run','code','make two changes','--foreground']);const s=state(dir),r=report(dir);
+    const dir=project();codeWorkflow(dir);orch(dir,['run','code','make two changes','--foreground']);const s=state(dir),r=report(dir);
     assert.equal(s.status,'completed',s.error);assert.deepEqual(r.calls.map((c)=>c.entry),['strong','strong','small','small']);
     assert.equal(r.tasks.length,2);assert.match(readFileSync(join(dir,'.orchestra/runs',s.id,'tasks.md'),'utf8'),/\[x\] T001/);
   },
   'step 5: no-changes prevents dependent work and ticks; failed gates never tick'() {
-    const dir=project();taskFile(dir,'## Phase 1: Work\n- [ ] T001 Make nothing\n- [ ] T002 Depends on first\n');
+    const dir=project();codeWorkflow(dir);taskFile(dir,'## Phase 1: Work\n- [ ] T001 Make nothing\n- [ ] T002 Depends on first\n');
     assert.equal(orchRaw(dir,['run','code','--task-file','tasks.md','--foreground'],{MOCK_NOOP:'T001'}).code,1);
     const r=report(dir);assert.equal(r.tokens.calls,4);assert.equal(r.steps['execute/T001'].status,'no-changes');assert.equal(r.status,'failed');
     assert.doesNotMatch(sh(dir,'git',['show',`${state(dir).branch}:tasks.md`]),/\[x\]/);
-    const gated=project();taskFile(gated,'## Phase 1: Work\n- [ ] T001 Write one\n');
+    const gated=project();codeWorkflow(gated);taskFile(gated,'## Phase 1: Work\n- [ ] T001 Write one\n');
     assert.equal(orchRaw(gated,['run','code','--task-file','tasks.md','--gate','echo detail; exit 7','--foreground']).code,1);
     const gr=report(gated);assert.equal(gr.gates[0].exit,7);assert.equal(gr.gates[0].command,'echo detail; exit 7');assert.ok(gr.gates.every(g=>g.revision));assert.equal(gr.gates.at(-1).revision,gr.finalCommit);
     assert.equal(gr.tasks[0].status,'skipped');assert.doesNotMatch(sh(gated,'git',['show',`${state(gated).branch}:tasks.md`]),/\[x\]/);
   },
   'step 5: direct job has brief and worker calls, config and repeated gate overrides; land needs explicit branch'() {
-    const dir=project({gates:['exit 7']});orch(dir,['run','simple job','--tier','1','--gate','test -f mock-output/direct.txt','--gate','echo artifact > generated.txt','--foreground']);
-    const r=report(dir);assert.equal(r.tokens.calls,2);assert.equal(r.calls[1].entry,'small');assert.equal(r.gates.length,2);
+    const dir=project({gates:['exit 7']});orch(dir,['run','solo','simple job','--gate','test -f mock-output/direct.txt','--gate','echo artifact > generated.txt','--foreground']);
+    const r=report(dir);assert.equal(r.tokens.calls,2);assert.equal(r.calls[1].entry,'medium');assert.equal(r.gates.length,2);
     assert.doesNotMatch(sh(dir,'git',['ls-tree','-r','--name-only',state(dir).branch]),/generated.txt/);
     assert.match(orchRaw(dir,['land']).err,/name the target explicitly/);sh(dir,'git',['branch','target']);orch(dir,['land','target']);
     assert.equal(sh(dir,'git',['branch','--show-current']).trim(),'target');assert.ok(existsSync(join(dir,'mock-output/direct.txt')));
     assert.equal(sh(dir,'git',['ls-tree','-r','--name-only','main']).includes('mock-output'),false);
   },
   'step 4: interrupted lane resumes from its branch without rerunning merged work'() {
-    const dir=project({fanout:{executors:1}});taskFile(dir,'## Phase 1: Work\n- [ ] T001 First\n- [ ] T002 Second\n');
+    const dir=project({fanout:{executors:1}});codeWorkflow(dir);taskFile(dir,'## Phase 1: Work\n- [ ] T001 First\n- [ ] T002 Second\n');
     orch(dir,['run','code','--task-file','tasks.md','--detach'],{MOCK_CRASH_TITLE:'T002'});
     waitFor(()=>state(dir).status==='crashed','lane crash');const before=report(dir);assert.equal(before.steps['execute/T001'].status,'completed');
     orch(dir,['resume']);waitFor(()=>state(dir).status==='completed','lane resume');const r=report(dir);assert.equal(r.tokens.calls,4);assert.equal(r.tokens.unreported,1);assert.equal(r.steps['execute/T001'].attempts.length,1);
     assert.match(sh(dir,'git',['show',`${state(dir).branch}:tasks.md`]),/\[x\] T002/);
   },
   'step 4: conflicts redo once on the merged revision with no planning call'() {
-    const dir=project();taskFile(dir,'## Phase 1: Work\n- [ ] T001 [P] First\n- [ ] T002 [P] Second\n');
+    const dir=project();codeWorkflow(dir);taskFile(dir,'## Phase 1: Work\n- [ ] T001 [P] First\n- [ ] T002 [P] Second\n');
     orch(dir,['run','code','--task-file','tasks.md','--foreground'],{MOCK_CONFLICT:'1'});const r=report(dir);
-    assert.equal(r.status,'completed',state(dir).error);assert.equal(r.tokens.calls,4);assert.ok(r.steps.execute.lanes.T002.redo);
+    assert.equal(r.status,'completed',state(dir).error);assert.equal(r.tokens.calls,4);assert.ok(r.steps.execute.branches.T002.redo);
     assert.equal(sh(dir,'git',['show',`${state(dir).branch}:shared.txt`]),'T002 [P] Second\n');
   },
   'queue, questions from an agent, steering, quota waiting and records use no idle calls'() {
-    const dir=project();orch(dir,['run','one job','--detach'],{MOCK_QUESTIONS:'1'});waitFor(()=>state(dir).status==='awaiting_user','agent questions');
+    const dir=project();orch(dir,['run','solo','one job','--detach'],{MOCK_QUESTIONS:'1'});waitFor(()=>state(dir).status==='awaiting_user','agent questions');
     assert.equal(report(dir).tokens.calls,2);orch(dir,['steer','use the chosen name']);orch(dir,['answer','1. pg 2. chosen']);waitFor(()=>state(dir).status==='completed','direct answers');
     assert.equal(report(dir).tokens.calls,3);assert.equal(state(dir).directions[0].text,'use the chosen name');
-    const waiting=project({agents:{only:{cli:'mock',model:'one',tier:1}}});orch(waiting,['run','higher tier needed','--detach']);waitFor(()=>state(waiting).status==='awaiting_quota','quota wait');
+    const waiting=project({agents:{only:{cli:'mock',model:'one',tier:1}}});orch(waiting,['run','solo','higher tier needed','--detach']);waitFor(()=>state(waiting).status==='awaiting_quota','quota wait');
     assert.equal(report(waiting).tokens.calls,0);orch(waiting,['stop']);waitFor(()=>state(waiting).status==='stopped','stop quota wait');
     assert.equal(report(waiting).tokens.calls,0);
   },
@@ -426,7 +429,7 @@ require('node:fs').writeSync(1,'Gemini Models\\tFive Hour limit remaining\\t75%\
     workflow(dir,'independent',[{id:'views',parallel:{prompt:'read.md',tier:3,count:2,distinct:'vendor'}}]);
     orch(dir,['run','independent','compare','--foreground'],{MOCK_STARTUP:'broken'});const r=report(dir);assert.equal(r.status,'completed',state(dir).error);
     const children=['views/0','views/1'].map((k)=>r.steps[k]);assert.equal(new Set(children.map((e)=>e.cli)).size,2);assert.equal(r.tokens.calls,4);
-    const override=project();workflow(override,'code',[{id:'cheap',agent:{prompt:'read.md',agent:'small'}}]);orch(override,['run','code','custom procedure','--foreground']);
+    const override=project();workflow(override,'solo',[{id:'cheap',agent:{prompt:'read.md',agent:'small'}}]);orch(override,['run','solo','custom procedure','--foreground']);
     assert.equal(report(override).tokens.calls,1);assert.equal(report(override).calls[0].entry,'small');assert.equal(report(override).tasks.length,0);
   },
   'step 4: distinct vendors fall back to any available agent when too few vendors exist'() {
@@ -436,28 +439,28 @@ require('node:fs').writeSync(1,'Gemini Models\\tFive Hour limit remaining\\t75%\
     assert.equal(r.tokens.calls,4);assert.deepEqual(['views/0','views/1','views/2'].map((k)=>r.steps[k].cli),['mock','mock','mock']);
   },
   'step 4: a repeated merge conflict waits for the user and makes no resolution call'() {
-    const dir=project();taskFile(dir,'## Phase 1: Work\n- [ ] T001 [P] First\n- [ ] T002 [P] Second\n');
+    const dir=project();codeWorkflow(dir);taskFile(dir,'## Phase 1: Work\n- [ ] T001 [P] First\n- [ ] T002 [P] Second\n');
     orch(dir,['run','code','--task-file','tasks.md','--detach'],{MOCK_CONFLICT:'1',MOCK_REPEAT_CONFLICT:'1'});
     waitFor(()=>state(dir).status==='awaiting_user','repeated conflict');const s=state(dir),r=report(dir);assert.equal(r.tokens.calls,4);
-    const lane=s.steps.execute.lanes.T002.branch;
+    const lane=s.steps.execute.branches.T002.branch;
     sh(dir,'git',['checkout',lane]);sh(dir,'git',['merge','-s','ours','--no-ff','-m','resolve lane ancestry',s.branch]);sh(dir,'git',['checkout','main']);
     orch(dir,['answer','Resolved the lane branch.']);waitFor(()=>state(dir).status==='completed','user conflict resolution');assert.equal(report(dir).tokens.calls,4);
   },
   'step 3: all exhausted agents wait without calls and refresh into a higher tier'() {
     const dir=project();writeFileSync(join(dir,'.orchestra/quota.json'),JSON.stringify({providers:{mock:{limitReached:'limit',observedAt:new Date().toISOString(),windows:[]}}}));
-    orch(dir,['run','wait for quota','--detach'],{ORCHESTRA_QUOTA_POLL_MS:'100'});waitFor(()=>state(dir).status==='awaiting_quota','all exhausted');assert.equal(report(dir).tokens.calls,0);
+    orch(dir,['run','solo','wait for quota','--detach'],{ORCHESTRA_QUOTA_POLL_MS:'100'});waitFor(()=>state(dir).status==='awaiting_quota','all exhausted');assert.equal(report(dir).tokens.calls,0);
     assert.match(orchRaw(dir,['check']).out,/requested tier or higher/);
     writeFileSync(join(dir,'.orchestra/quota.json'),JSON.stringify({providers:{}}));waitFor(()=>state(dir).status==='completed','quota recovered');assert.equal(report(dir).tokens.calls,2);
   },
   'step 5: direct read tasks return information; missing adapters hand over without planning'() {
-    const read=project();orch(read,['run','explain the project','--access','read','--foreground']);const r=report(read);assert.equal(r.tokens.calls,1);assert.equal(r.steps.task.status,'completed');assert.equal(r.finalCommit,r.baseCommit);
+    const read=project();reader(read);orch(read,['run','reader','explain the project','--foreground']);const r=report(read);assert.equal(r.tokens.calls,1);assert.equal(r.steps.task.status,'completed');assert.equal(r.finalCommit,r.baseCommit);
     const dir=project({agents:{missing:{cli:'absent',tier:2,weight:100000},good:{cli:'mock',model:'good',tier:2,weight:0.00001}}});
-    orch(dir,['run','one job','--foreground']);const out=report(dir);assert.equal(out.tokens.calls,2);assert.equal(out.calls[0].status,'startup-failed');assert.equal(out.calls[1].entry,'good');assert.match(state(dir).unavailable.missing.what,/not found/);
+    orch(dir,['run','solo','one job','--foreground']);const out=report(dir);assert.equal(out.tokens.calls,2);assert.equal(out.calls[0].status,'startup-failed');assert.equal(out.calls[1].entry,'good');assert.match(state(dir).unavailable.missing.what,/not found/);
   },
   'source ships only three adapters, no relays; old config and malformed queue fail clearly'() {
     assert.equal(existsSync(join(REPO,'orchestra/relays')),false);assert.deepEqual(readdirSync(join(REPO,'orchestra/adapters')).filter((f)=>f.endsWith('.json')).sort(),['agy.json','claude.json','codex.json']);
-    const dir=project();writeFileSync(join(dir,'.orchestra/queue.json'),'{ broken');assert.match(orchRaw(dir,['queue','add','x']).err,/corrupt/);
-    const cfgFile=join(dir,'.orchestra/config.json'),cfg=JSON.parse(readFileSync(cfgFile));cfg.roles={};writeFileSync(cfgFile,JSON.stringify(cfg));assert.match(orchRaw(dir,['run','x','--foreground']).err,/unknown config option: roles/);
+    const dir=project();writeFileSync(join(dir,'.orchestra/queue.json'),'{ broken');assert.match(orchRaw(dir,['queue','add','solo','x']).err,/corrupt/);
+    const cfgFile=join(dir,'.orchestra/config.json'),cfg=JSON.parse(readFileSync(cfgFile));cfg.roles={};writeFileSync(cfgFile,JSON.stringify(cfg));assert.match(orchRaw(dir,['run','solo','x','--foreground']).err,/unknown config option: roles/);
   }
 };
 Object.assign(tests, {
@@ -473,40 +476,100 @@ Object.assign(tests, {
       const w=JSON.parse(readFileSync(file));mutation(w);writeFileSync(join(dir,'invalid.json'),JSON.stringify(w));assert.equal(orchRaw(dir,['workflow','check',join(dir,'invalid.json')]).code,1);
     }
   },
-  'step 6: author workflow waits for approval and saves only workflow files'() {
-    const dir=project(),pack=join(dir,'input.json');
-    writeFileSync(pack,JSON.stringify({name:'example',files:{'workflow.json':JSON.stringify({workflow:2,description:'Reads the project. Give a question. Returns an answer.',budget:{calls:1},steps:[{id:'read',agent:{prompt:'read.md',access:'read'}}]}),'read.md':'ORCHESTRA ROLE: example\nCYCLE: 1\nRead only.'}}));
-    orch(dir,['run','new-workflow','create a repeatable reader','--detach'],{MOCK_PACK_FILE:pack});waitFor(()=>state(dir).status==='awaiting_user','description');
-    assert.equal(report(dir).tokens.calls,0);orch(dir,['answer','Build it anyway.']);waitFor(()=>state(dir).questions?.origin==='approve','approval');
-    assert.equal(existsSync(join(dir,'.orchestra/workflows/example')),false);
-    const draft=join(dir,'.orchestra/runs',state(dir).id,'workflows/example/workflow.drawio');
-    assert.ok(existsSync(draft));
-    const preview=join(dirname(dirname(draft)),'workflow.drawio');
-    assert.ok(state(dir).questions.items[0].question.includes(preview));assert.equal(readFileSync(preview,'utf8'),readFileSync(draft,'utf8'));
-    assert.equal(readFileSync(draft,'utf8'),workflowDiagram(JSON.parse(readFileSync(join(dirname(draft),'workflow.json')))));
-    assert.equal(report(dir).gates.length,3);assert.ok(report(dir).gates.every(g=>g.exit===0));
-    orch(dir,['answer','approve project']);waitFor(()=>state(dir).status==='completed','save');
-    assert.ok(existsSync(join(dir,'.orchestra/workflows/example/workflow.json')));assert.ok(existsSync(join(dir,'.orchestra/workflows/example/workflow.drawio')));assert.match(orch(dir,['workflow','check',join(dir,'.orchestra/workflows/example/workflow.json')]),/valid/);assert.equal(report(dir).tokens.calls,1);assert.equal(report(dir).finalCommit,report(dir).baseCommit);
-  }
 });
 Object.assign(tests, {
-  'step 7: council uses independent vendors, anonymous peers, checked evidence and a user decision record'() {
-    const dir=project({agents:{low:{cli:'mock',model:'low',tier:1},a:{cli:'mock',model:'first',tier:3},b:{cli:'second',model:'second',tier:3},c:{cli:'third',model:'third',tier:3}}});
-    for(const n of ['second','third'])cpSync(join(dir,'.orchestra/adapters/mock.json'),join(dir,'.orchestra/adapters',n+'.json'));
-    orch(dir,['run','council','Which option?','--detach'],{MOCK_EVIDENCE:'1'});waitFor(()=>state(dir).status==='awaiting_user','frame');
-    assert.equal(report(dir).tokens.calls,0);orch(dir,['answer','Compare two approaches.']);waitFor(()=>state(dir).questions?.origin==='decide','council decision');
-    const r=report(dir),runDir=join(dir,'.orchestra/runs',state(dir).id);assert.equal(r.tokens.calls,9);assert.equal(new Set(r.calls.filter(c=>c.step.startsWith('proposals/') && !c.purpose).map(c=>r.steps[c.step].cli)).size,3);
-    const verify=JSON.parse(readFileSync(join(runDir,'verification.json')));assert.ok(verify.verified>0);assert.ok(verify.unverified>0);
-    for(const c of r.calls.filter(c=>c.step.includes('/critique/') && !c.purpose)){const brief=readFileSync(join(runDir,c.log,'brief.md'),'utf8');const inputs=brief.split('Inputs: ')[1].split('Questions already answered:')[0];assert.doesNotMatch(inputs,/response from first|response from second|response from third/);assert.match(inputs,/Peer 1/);}
-    orch(dir,['answer','Choose the first approach because its evidence matches.']);waitFor(()=>state(dir).status==='completed','record');
-    const text=readFileSync(join(runDir,'decision.md'),'utf8');for(const heading of ['# Decision:','Date:','Question:','## Decision','## Rejected options','## Open questions','## Sources'])assert.ok(text.includes(heading));assert.match(text,/Choose the first approach/);assert.match(text,/unverified/);
-    assert.equal(report(dir).baseCommit,report(dir).finalCommit);assert.equal(sh(dir,'git',['status','--porcelain']).trim(),'');
-    for(const name of ['council-compare','council-learn','council-review'])assert.match(orch(dir,['workflow','run',name,'--dry']),/13\/16/);
+  'routing: a choices step picks one path; the engine follows only listed values'() {
+    const steps=[{id:'decide',agent:{prompt:'read.md',tier:1,choices:{field:'action',values:['fix','rewrite']}}},
+      {id:'fix',when:{step:'decide',field:'action',equals:'fix'},agent:{prompt:'read.md',tier:1}},
+      {id:'rewrite',when:{step:'decide',field:'action',equals:'rewrite'},agent:{prompt:'read.md',tier:1}},
+      {id:'after',agent:{prompt:'read.md',tier:1}}];
+    const brief=(dir,call)=>readFileSync(join(dir,'.orchestra/runs',state(dir).id,call.log,'brief.md'),'utf8');
+    const dir=project();workflow(dir,'route',steps,16,{},3);
+    orch(dir,['run','route','choose a path','--foreground'],{MOCK_CHOICE:'action=rewrite'});const r=report(dir);
+    assert.equal(r.status,'completed',state(dir).error);assert.deepEqual(r.calls.map(c=>c.step),['decide','rewrite','after']);
+    assert.equal(r.steps.decide.output.action,'rewrite');assert.equal(r.steps.fix,undefined);
+    assert.ok(brief(dir,r.calls[0]).includes('"action" field is exactly one of: "fix", "rewrite"'));
+    const retry=project();workflow(retry,'route',steps,16,{},3);
+    orch(retry,['run','route','choose a path','--foreground'],{MOCK_CHOICE:'action=fix',MOCK_CHOICE_FIRST:'maybe'});const rr=report(retry);
+    assert.equal(rr.status,'completed',state(retry).error);assert.deepEqual(rr.calls.map(c=>c.step),['decide','decide','fix','after']);
+    assert.match(brief(retry,rr.calls[1]),/must be one of fix, rewrite/);
+    const bad=project();workflow(bad,'route',steps,16,{},3);
+    assert.equal(orchRaw(bad,['run','route','choose a path','--foreground'],{MOCK_CHOICE:'action=maybe'}).code,1);
+    const br=report(bad);assert.equal(br.status,'failed');assert.ok(br.calls.every(c=>c.step==='decide'));
+  },
+  'routing: routes inside loops use each iteration\'s choice; dry runs follow the first value'() {
+    const dir=project(),steps=[{id:'repeat',loop:{max:2,until:{step:'check',field:'stop',equals:true},steps:[
+      {id:'decide',agent:{prompt:'read.md',tier:1,choices:{field:'action',values:['fix','rewrite']}}},
+      {id:'fix',when:{step:'decide',field:'action',equals:'fix'},agent:{prompt:'read.md',tier:1}},
+      {id:'rewrite',when:{step:'decide',field:'action',equals:'rewrite'},agent:{prompt:'read.md',tier:1}},
+      {id:'check',agent:{prompt:'read.md',tier:1}}]}}];
+    workflow(dir,'looped',steps,16,{},3);
+    orch(dir,['run','looped','route in a loop','--foreground'],{MOCK_CHOICE:'action=fix'});const r=report(dir);
+    assert.equal(r.status,'completed',state(dir).error);assert.equal(r.steps.repeat.iteration,1);
+    assert.deepEqual(r.calls.map(c=>c.step),['repeat/0/decide','repeat/0/fix','repeat/0/check']);
+    const changing=project(),again=[{id:'repeat',loop:{max:3,until:{step:'check',field:'stop',equals:true},steps:[
+      ...steps[0].loop.steps.slice(0,3),{id:'check',agent:{prompt:'read.md',tier:1,sees:['fix']}}]}}];
+    workflow(changing,'looped',again,16,{},3);
+    orch(changing,['run','looped','route twice','--foreground'],{MOCK_CHOICE:'action=fix,rewrite',MOCK_STOP_CYCLE:'2'});const c=report(changing);
+    assert.equal(c.status,'completed',state(changing).error);assert.equal(c.steps.repeat.iteration,2);
+    assert.deepEqual(c.calls.map(x=>x.step),['repeat/0/decide','repeat/0/fix','repeat/0/check','repeat/1/decide','repeat/1/rewrite','repeat/1/check']);
+    const inputs=(step)=>readFileSync(join(changing,'.orchestra/runs',state(changing).id,c.calls.find(x=>x.step===step).log,'brief.md'),'utf8').split('Inputs: ')[1].split('\n')[0];
+    assert.match(inputs('repeat/0/check'),/"fix"/);assert.equal(inputs('repeat/1/check'),'{}','a step passed over has no output');
+    const dry=orch(dir,['workflow','run','looped','--dry']);
+    assert.match(dry,/repeat\/0\/decide: mock choice action = "fix" \(first listed\)/);assert.match(dry,/repeat\/0\/rewrite: agent \(skipped: runs when decide.action = "rewrite"\)/);
+  },
+  'routing: validation rejects routes the graph cannot follow'() {
+    const dir=project(),ask={id:'ask',ask:{questions:['Choose?']}};
+    const decide={id:'decide',agent:{prompt:'read.md',choices:{field:'action',values:['fix','rewrite']}}};
+    const when=(equals='fix',step='decide')=>({step,field:'action',equals});
+    const check=(w)=>{const f=workflow(dir,'candidate',w.steps,4,{},w.workflow);return orchRaw(dir,['workflow','check',join(f,'workflow.json')]);};
+    const cases=[
+      [{workflow:2,steps:[{id:'plain',agent:{prompt:'read.md'}},{...ask,when:when('fix','plain')}]},/invalid step ask/],
+      [{workflow:3,steps:[{...ask,when:when()},decide]},/earlier step's choices/],
+      [{workflow:3,steps:[decide,{...ask,when:when('other')}]},/earlier step's choices/],
+      [{workflow:3,steps:[{id:'plain',agent:{prompt:'read.md'}},{...ask,when:when('fix','plain')}]},/earlier step's choices/],
+      [{workflow:3,steps:[{id:'views',parallel:{prompt:'read.md',choices:decide.agent.choices}}]},/choices need workflow v3 and an agent step/],
+      [{workflow:3,steps:[{id:'one',agent:{prompt:'read.md',choices:{field:'action',values:['only']}}}]},/two or more distinct/],
+      [{workflow:3,steps:[{id:'work',lanes:{tier:1}}]},/names the lanes block tasks/],
+      [{workflow:3,steps:[{id:'__start__',ask:ask.ask}]},/unique id/],
+      [{workflow:3,steps:[{id:'repeat',loop:{max:1,until:{step:'decide',field:'action',equals:'fix'},steps:[decide]}},{...ask,when:when()}]},/earlier step's choices/]];
+    for(const [w,error] of cases){const result=check(w);assert.equal(result.code,1,JSON.stringify(w));assert.match(result.err,error);}
+    const f=workflow(dir,'nested',[decide,{id:'repeat',loop:{max:1,until:{step:'ask',field:'x',equals:true},steps:[{...ask,when:when()}]}}],4,{},3);
+    orch(dir,['workflow','diagram','nested']);assert.match(orch(dir,['workflow','check',join(f,'workflow.json')]),/valid/);
+    assert.match(readFileSync(join(f,'workflow.drawio'),'utf8'),/only when decide.action = &quot;fix&quot;/);
+  },
+  'graph: runs need a workflow; branches are readable; tracing stays local; installs carry LangGraph'() {
+    const dir=project();assert.ok(existsSync(join(dir,'.orchestra/engine/node_modules/@langchain/langgraph/package.json')));
+    const bare=orchRaw(dir,['run','do something useful']);assert.equal(bare.code,1);assert.match(bare.err,/usage: orchestra run <workflow> "<task>"/);
+    assert.equal(existsSync(join(dir,'.orchestra/queue.json')),false);
+    assert.equal(orchRaw(dir,['queue','add','do something']).code,1);
+    codeWorkflow(dir);taskFile(dir,'## Phase 1: Work\n- [ ] T001 [P] [X] Write the first file\n- [ ] T002 [P] Write two\n');
+    orch(dir,['run','code','--task-file','tasks.md','--foreground']);const s=state(dir);
+    assert.equal(s.status,'completed',s.error);assert.match(s.id,/^\d{8}-\d{6}-[a-z0-9]{1,4}$/);assert.equal(s.branch,`orchestra/${s.id}`);
+    assert.equal(s.steps.execute.branches.T001.branch,`${s.branch}.execute.T001-write-the-first-file`);
+    assert.equal(s.steps.execute.branches.T002.branch,`${s.branch}.execute.T002-write-two`);
+    assert.deepEqual(sh(dir,'git',['branch','--list',`${s.branch}.*`]).trim(),'','work branches are removed after completion');
+    const traced=project();
+    orch(traced,['run','solo','change files','--gate','test "$LANGCHAIN_TRACING_V2" = true','--foreground'],{LANGCHAIN_TRACING_V2:'true'});
+    assert.equal(state(traced).status,'completed',state(traced).error);assert.equal(report(traced).gates[0].exit,0);
+  },
+  'parallel: anonymized peers see labels instead of agent names'() {
+    const dir=project({agents:{a:{cli:'mock',model:'first',tier:3},b:{cli:'second',model:'second',tier:3}}});
+    cpSync(join(dir,'.orchestra/adapters/mock.json'),join(dir,'.orchestra/adapters/second.json'));
+    workflow(dir,'peers',[{id:'views',parallel:{prompt:'read.md',tier:3,count:2,distinct:'vendor'}},
+      {id:'critique',parallel:{prompt:'read.md',tier:3,count:2,distinct:'vendor',sees:['views'],anonymize:true}}]);
+    orch(dir,['run','peers','compare','--foreground']);const r=report(dir),runDir=join(dir,'.orchestra/runs',state(dir).id);
+    assert.equal(r.status,'completed',state(dir).error);
+    const critics=r.calls.filter(c=>c.step.startsWith('critique/') && !c.purpose);assert.equal(critics.length,2);
+    for(const c of critics) {
+      const inputs=readFileSync(join(runDir,c.log,'brief.md'),'utf8').split('Inputs: ')[1].split('Questions already answered:')[0];
+      assert.doesNotMatch(inputs,/response from (first|second)/);assert.match(inputs,/Peer 1/);assert.doesNotMatch(inputs,/Peer 2/);
+    }
   }
 });
 Object.assign(tests, {
   'machine knowledge: confirmed notes cross projects, list every CLI, approve and remove by ID'() {
-    const one=project(),two=project(),user=mkdtempSync(join(tmpdir(),'orchestra-user-'));tmpRoots.push(user);const env={HOME:user};
+    const one=project(),two=project();reader(one);const user=mkdtempSync(join(tmpdir(),'orchestra-user-'));tmpRoots.push(user);const env={HOME:user};
     const load=(cli)=>JSON.parse(orch(two,['knowledge','--json',...(cli?['--cli',cli]:[])],env)).items;
     orch(one,['knowledge','add','Use a supported flag','--cli','mock'],env);orch(one,['knowledge','add','use  a supported flag','--cli','mock'],env);
     orch(one,['knowledge','add','Different CLI advice','--cli','other'],env);
@@ -514,7 +577,7 @@ Object.assign(tests, {
     orch(two,['knowledge','approve','K2'],env);const items=load('mock');assert.equal(items.length,1);assert.equal(items[0].trusted,true);assert.deepEqual(items[0].merged,['K1']);
     assert.notEqual(orchRaw(one,['knowledge','add','Run npm test'],env).code,0);
     orch(one,['knowledge','rm','K3'],env);assert.equal(load().length,1);
-    orch(one,['run','Explain','--access','read','--foreground'],{...env,MOCK_SUGGESTION:'1'});const r=report(one);assert.equal(r.suggestions.length,1);
+    orch(one,['run','reader','Explain','--foreground'],{...env,MOCK_SUGGESTION:'1'});const r=report(one);assert.equal(r.suggestions.length,1);
     const brief=readFileSync(join(one,'.orchestra/runs',state(one).id,r.calls[0].log,'brief.md'),'utf8');assert.match(brief,/\[confirmed\] use  a supported flag/);assert.doesNotMatch(brief,/Different CLI advice/);
     for(const dir of [one,two])for(const file of ['knowledge.json','KNOWLEDGE.md'])assert.equal(existsSync(join(dir,'.orchestra',file)),false);
     const pack=join(one,'pack');mkdirSync(pack);workflow(one,'small',[{id:'read',agent:{prompt:'read.md'}}]);cpSync(join(one,'.orchestra/workflows/small'),join(pack,'small'),{recursive:true});
@@ -522,9 +585,9 @@ Object.assign(tests, {
   },
   'machine knowledge: startup failures record once and reach the next brief for that CLI'() {
     const user=mkdtempSync(join(tmpdir(),'orchestra-startup-home-'));tmpRoots.push(user);const env={HOME:user,MOCK_STARTUP:'broken'};
-    const dir=project({agents:{bad:{cli:'mock',model:'broken',tier:2,weight:100000},good:{cli:'mock',model:'good',tier:2,weight:0.00001}}});
+    const dir=project({agents:{bad:{cli:'mock',model:'broken',tier:2,weight:100000},good:{cli:'mock',model:'good',tier:2,weight:0.00001}}});reader(dir);
     for(let n=0;n<2;n++) {
-      orch(dir,['run','Explain','--access','read','--foreground'],env);const r=report(dir);
+      orch(dir,['run','reader','Explain','--foreground'],env);const r=report(dir);
       assert.equal(r.calls[0].status,'startup-failed');assert.equal(r.calls[1].status,'completed');
       const items=JSON.parse(orch(dir,['knowledge','--json'],env)).items;assert.equal(items.length,1);assert.equal(items[0].trusted,false);assert.equal(items[0].cli,'mock');
       assert.equal(items[0].text,`cannot start. Fix: ${r.unavailable.bad.fix}`);
@@ -534,50 +597,30 @@ Object.assign(tests, {
   },
   'machine knowledge: scoped lessons, normalized deduplication and bounded newest observations'() {
     const user=mkdtempSync(join(tmpdir(),'orchestra-lessons-home-'));tmpRoots.push(user);const env={HOME:user};
-    const dir=project(),load=()=>JSON.parse(orch(dir,['knowledge','--json'],env)).items;
+    const dir=project(),load=()=>JSON.parse(orch(dir,['knowledge','--json'],env)).items;reader(dir);
     orch(dir,['knowledge','add','Keep this confirmed note','--cli','mock'],env);
     const lessons=[...Array.from({length:12},(_,n)=>({scope:'cli',text:`Machine lesson ${n+1}`})),{scope:'project',text:'Run the project check'},{scope:'code',text:'Keep functions small'}];
-    orch(dir,['run','Explain','--access','read','--foreground'],{...env,MOCK_LESSONS:JSON.stringify(lessons)});
+    orch(dir,['run','reader','Explain','--foreground'],{...env,MOCK_LESSONS:JSON.stringify(lessons)});
     assert.equal(load().length,13);assert.ok(load().slice(1).every(i=>!i.trusted));
     assert.deepEqual(report(dir).suggestions,lessons.slice(-2));
-    orch(dir,['run','Explain','--access','read','--foreground'],{...env,MOCK_LESSONS:JSON.stringify([{scope:'cli',text:'  MACHINE   lesson 1  '},{scope:'cli',text:' keep THIS confirmed NOTE '}])});
+    orch(dir,['run','reader','Explain','--foreground'],{...env,MOCK_LESSONS:JSON.stringify([{scope:'cli',text:'  MACHINE   lesson 1  '},{scope:'cli',text:' keep THIS confirmed NOTE '}])});
     assert.equal(load().length,13);
     const brief=()=>{const r=report(dir);return readFileSync(join(dir,'.orchestra/runs',state(dir).id,r.calls[0].log,'brief.md'),'utf8');};
     assert.match(brief(),/\[confirmed\] Keep this confirmed note/);
     assert.equal((brief().match(/\[observed\]/g) ?? []).length,10);assert.doesNotMatch(brief(),/Machine lesson [12]\n/);assert.match(brief(),/Machine lesson 3\n/);assert.match(brief(),/Machine lesson 12/);
     const config=join(dir,'.orchestra/config.json'),cfg=JSON.parse(readFileSync(config));cfg.knowledgeObservedLimit=2;writeFileSync(config,JSON.stringify(cfg));
-    orch(dir,['run','Explain','--access','read','--foreground'],env);assert.equal((brief().match(/\[observed\]/g) ?? []).length,2);assert.match(brief(),/Machine lesson 11/);
-    cfg.knowledgeObservedLimit=0;writeFileSync(config,JSON.stringify(cfg));orch(dir,['run','Explain','--access','read','--foreground'],env);assert.doesNotMatch(brief(),/\[observed\]/);assert.match(brief(),/\[confirmed\]/);
+    orch(dir,['run','reader','Explain','--foreground'],env);assert.equal((brief().match(/\[observed\]/g) ?? []).length,2);assert.match(brief(),/Machine lesson 11/);
+    cfg.knowledgeObservedLimit=0;writeFileSync(config,JSON.stringify(cfg));orch(dir,['run','reader','Explain','--foreground'],env);assert.doesNotMatch(brief(),/\[observed\]/);assert.match(brief(),/\[confirmed\]/);
     orch(dir,['knowledge','approve','K2'],env);assert.equal(load().filter(i=>i.trusted).length,2);
-    const failed=project({executorRetries:0});
+    const failed=project({executorRetries:0});reader(failed);
     const failedLessons=[{scope:'cli',text:'Failure diagnostic lesson'},{scope:'project',text:'Failure build command'},{scope:'code',text:'Failure code rule'}];
-    assert.notEqual(orchRaw(failed,['run','Explain','--access','read','--foreground'],{...env,MOCK_FAIL:'all',MOCK_LESSONS:JSON.stringify(failedLessons)}).code,0);
+    assert.notEqual(orchRaw(failed,['run','reader','Explain','--foreground'],{...env,MOCK_FAIL:'all',MOCK_LESSONS:JSON.stringify(failedLessons)}).code,0);
     assert.deepEqual(report(failed).suggestions,failedLessons.slice(1));assert.equal(load().at(-1).text,failedLessons[0].text);
     for(const file of ['knowledge.json','KNOWLEDGE.md'])assert.equal(existsSync(join(dir,'.orchestra',file)),false);
   }
 });
 Object.assign(tests, {
-  'step 7: evidence gate checks locations, ranges, exact quotes and undeclared quotations against actual files'() {
-    const dir=project(),run=join(dir,'.orchestra/evidence');mkdirSync(run);
-    const outside=join(dir,'.orchestra/outside.md');writeFileSync(outside,'outside');
-    writeFileSync(join(run,'state.json'),JSON.stringify({steps:{sample:{attempts:[{}],output:{
-      evidence:[{file:'README.md',line:1,quote:'# demo'},{file:'README.md',line:1,quote:'false'},{file:'README.md',line:900},{file:'missing.md',line:1},{file:outside,line:1}],
-      text:'README.md:1 and README.md:800; “undeclared quote”; https://example.org/source'
-    }}}}));
-    sh(dir,process.execPath,[join(REPO,'workflows/_shared/scripts/verify-quotes'),run]);const checks=JSON.parse(readFileSync(join(run,'verification.json'))).checks;
-    assert.ok(checks.some(c=>c.quote==='# demo' && c.status==='verified'));assert.ok(checks.some(c=>c.quote==='false' && c.status==='unverified'));
-    assert.ok(checks.some(c=>c.line===900 && c.status==='unverified'));assert.ok(checks.some(c=>c.file==='missing.md' && c.status==='unverified'));
-    assert.ok(checks.some(c=>c.quote==='undeclared quote' && c.status==='unverified'));assert.ok(checks.some(c=>c.line===800 && c.status==='unverified'));assert.ok(checks.some(c=>c.url && c.status==='unverified'));
-  },
-  'step 6: a draft cannot add source code and declined installation writes no project pack'() {
-    const dir=project(),pack=join(dir,'bad-pack.json');writeFileSync(pack,JSON.stringify({name:'bad',files:{'workflow.json':JSON.stringify({workflow:1,budget:{calls:1},steps:[{id:'ask',ask:{questions:['Choose?']}}]}),'engine.mjs':'process.exit()'}}));
-    orch(dir,['run','new-workflow','draft this','--detach'],{MOCK_PACK_FILE:pack});waitFor(()=>state(dir).status==='awaiting_user','bad draft description');orch(dir,['answer','Build it.']);waitFor(()=>state(dir).status==='failed','code rejection');assert.equal(report(dir).gates[0].exit,1);assert.equal(existsSync(join(dir,'.orchestra/workflows/bad')),false);
-    const other=project(),good=join(other,'good-pack.json');writeFileSync(good,JSON.stringify({name:'declined',files:{'workflow.json':JSON.stringify({workflow:2,description:'Asks a question. Give a topic. Returns your choice.',budget:{calls:1},steps:[{id:'ask',ask:{questions:['Choose?']}}]})}}));
-    orch(other,['run','new-workflow','draft this','--detach'],{MOCK_PACK_FILE:good});waitFor(()=>state(other).status==='awaiting_user','description');orch(other,['answer','Build it.']);waitFor(()=>state(other).questions?.origin==='approve','declined approval');orch(other,['answer','decline']);waitFor(()=>state(other).status==='completed','decline');assert.equal(existsSync(join(other,'.orchestra/workflows/declined')),false);
-  }
-});
-Object.assign(tests, {
-  'workflows: v2 requires a description while v1 packs still load'() {
+  'workflows: v2 and v3 require a description while v1 packs and the lanes name still load'() {
     const dir=project(),steps=[{id:'ask',ask:{questions:['Choose?']}}];
     const write=(name,w)=>{const f=join(dir,'.orchestra/workflows',name);mkdirSync(f,{recursive:true});writeFileSync(join(f,'workflow.json'),JSON.stringify(w));orch(dir,['workflow','diagram',name]);return join(f,'workflow.json');};
     assert.match(orch(dir,['workflow','check',write('old',{workflow:1,budget:{calls:1},steps})]),/valid/);
@@ -588,31 +631,28 @@ Object.assign(tests, {
     }
     const v1=join(dir,'v1-described.json');writeFileSync(v1,JSON.stringify({workflow:1,description:'x',budget:{calls:1},steps}));
     assert.match(orchRaw(dir,['workflow','check',v1]).err,/unknown workflow field/);
-    const v3=join(dir,'v3.json');writeFileSync(v3,JSON.stringify({workflow:3,description:'x',budget:{calls:1},steps}));
-    assert.equal(orchRaw(dir,['workflow','check',v3]).code,1);
+    assert.match(orch(dir,['workflow','check',write('routed',{workflow:3,description:'Asks. Give a topic. Returns a choice.',budget:{calls:1},steps})]),/valid/);
+    assert.match(orch(dir,['workflow','check',write('legacy',{workflow:1,budget:{calls:1},steps:[{id:'work',lanes:{tier:1}}]})]),/valid/);
+    const none=join(dir,'v3-none.json');writeFileSync(none,JSON.stringify({workflow:3,budget:{calls:1},steps}));assert.match(orchRaw(dir,['workflow','check',none]).err,/v3 requires a description/);
+    const v4=join(dir,'v4.json');writeFileSync(v4,JSON.stringify({workflow:4,description:'x',budget:{calls:1},steps}));
+    assert.equal(orchRaw(dir,['workflow','check',v4]).code,1);
   },
   'workflows: list shows each name once in search order with its source and description'() {
     const dir=project(),steps=[{id:'ask',ask:{questions:['Choose?']}}];
     const write=(name,w)=>{const f=join(dir,'.orchestra/workflows',name);mkdirSync(f,{recursive:true});writeFileSync(join(f,'workflow.json'),typeof w==='string'?w:JSON.stringify(w));};
     write('old',{workflow:1,budget:{calls:1},steps});write('broken','{');
     const builtin=readdirSync(join(REPO,'workflows')).filter(n=>existsSync(join(REPO,'workflows',n,'workflow.json')));
+    const shipped=JSON.parse(orch(dir,['workflow','list','--json'])).filter(p=>p.source==='built-in');
+    assert.deepEqual(shipped.map(p=>p.name),builtin);
+    for(const p of shipped){assert.ok(p.description.trim(),p.name);assert.equal(p.version,3);assert.ok(existsSync(p.guide),p.name);}
     write(builtin[0],{workflow:2,description:'Project override.',budget:{calls:1},steps});
     const list=JSON.parse(orch(dir,['workflow','list','--json'])),by=Object.fromEntries(list.map(p=>[p.name,p]));
     assert.equal(list.length,new Set(list.map(p=>p.name)).size);
     assert.equal(by[builtin[0]].source,'project');assert.equal(by[builtin[0]].description,'Project override.');
     assert.equal(by.old.description,null);assert.equal(by.old.guide,null);assert.equal(by.old.version,1);assert.ok(by.broken.error);
-    for(const name of builtin.slice(1)){assert.equal(by[name].source,'built-in');assert.ok(by[name].description.trim(),name);assert.equal(by[name].version,2);assert.ok(existsSync(by[name].guide),name);}
     const text=orch(dir,['workflow','list']);assert.match(text,/no description \(workflow v1\)/);assert.match(text,/invalid: /);assert.match(text,/Project override\./);
     assert.equal(orchRaw(dir,['workflow','list','extra']).code,1);
   },
-  'step 6: a draft without a description is rejected and not saved'() {
-    const dir=project(),pack=join(dir,'v1-pack.json');
-    writeFileSync(pack,JSON.stringify({name:'undescribed',files:{'workflow.json':JSON.stringify({workflow:1,budget:{calls:1},steps:[{id:'ask',ask:{questions:['Choose?']}}]})}}));
-    orch(dir,['run','new-workflow','draft this','--detach'],{MOCK_PACK_FILE:pack});waitFor(()=>state(dir).status==='awaiting_user','description');
-    assert.match(state(dir).questions.items[0].question,/description of the workflow is required/);
-    orch(dir,['answer','Build it.']);waitFor(()=>state(dir).status==='failed','description rejection');
-    assert.equal(report(dir).gates[0].exit,1);assert.equal(existsSync(join(dir,'.orchestra/workflows/undescribed')),false);
-  }
 });
 Object.assign(tests, {
   'constitution: public core stays independent of CLIs and workflows'() {
@@ -704,7 +744,7 @@ Object.assign(tests, {
     const dir=project(),cfgPath=join(dir,'.orchestra/config.json'),cfg=JSON.parse(readFileSync(cfgPath));
     cfg.agents.strong.quotaFrom='top';writeFileSync(cfgPath,JSON.stringify(cfg));
     writeFileSync(join(dir,'.orchestra/quota.json'),JSON.stringify({providers:{top:{limitReached:'limit',observedAt:new Date().toISOString(),windows:[]}}}));
-    orch(dir,['run','change files','--detach'],{ORCHESTRA_QUOTA_POLL_MS:'100'});
+    orch(dir,['run','solo','change files','--detach'],{ORCHESTRA_QUOTA_POLL_MS:'100'});
     waitFor(()=>state(dir).status==='awaiting_quota','strong quota wait');assert.equal(report(dir).tokens.calls,0);
     writeFileSync(join(dir,'.orchestra/quota.json'),JSON.stringify({providers:{}}));
     waitFor(()=>state(dir).status==='completed','strong quota recovery');

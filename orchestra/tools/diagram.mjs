@@ -1,20 +1,28 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { normalizeWorkflow } from '../lib/workflows.mjs';
 
-const colors = { agent:'#dae8fc', parallel:'#e1d5e7', ask:'#fff2cc', gate:'#d5e8d4', loop:'#ffe6cc', lanes:'#f8cecc' };
+const colors = { agent:'#dae8fc', parallel:'#e1d5e7', ask:'#fff2cc', gate:'#d5e8d4', loop:'#ffe6cc', tasks:'#f8cecc' };
 const kindOf = (step) => Object.keys(colors).find((kind) => step[kind]);
 const xml = (value) => String(value).replace(/[&<>"'\r\n]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;','\r':'&#13;','\n':'&#10;'}[c]));
 const selection = (b) => `${b.agent ? `agent: ${b.agent}` : `tier: ${b.tier ?? 2}`} · access: ${b.access ?? 'read'}`;
 function label(step) {
   const kind=kindOf(step), b=step[kind], lines=[`${step.id} · ${kind}`];
+  if(step.when)lines.push(`runs when ${step.when.step}.${step.when.field} = ${JSON.stringify(step.when.equals)}`);
   if(kind==='agent' || kind==='parallel')lines.push(selection(b));
+  if(b.choices)lines.push(`chooses ${b.choices.field}: ${b.choices.values.join(' | ')}`);
   if(kind==='parallel')lines.push(`count: ${b.count ?? 2}${b.distinct ? ' · distinct: vendor' : ''}`,`anonymised: ${b.anonymize ? 'yes' : 'no'}`,`sees: ${Array.isArray(b.sees) ? b.sees.join(', ') || 'none' : b.sees ?? 'none'}`);
   if(kind==='agent' && b.access==='write')lines.push('engine brief below highest tier; diagnosis before retry');
   if(kind==='ask')lines.push('you answer');
   if(kind==='gate')lines.push(b.command);
-  if(kind==='lanes')lines.push('engine plan if no task file; one brief call per phase below highest tier','phases in order, [P] tasks in parallel worktrees, merge, gates','engine diagnosis before task retries');
+  if(kind==='tasks')lines.push('engine plan if no task file; one brief call per phase below highest tier','phases in order, [P] tasks in parallel worktrees, merge, gates','engine diagnosis before task retries');
   if(kind==='loop')lines.push(`max: ${b.max}`);
   return lines.join('\n');
+}
+// The label on the edge into a step: when it runs at all, or when it is skipped.
+function condition(step) {
+  if(step.when)return `only when ${step.when.step}.${step.when.field} = ${JSON.stringify(step.when.equals)}`;
+  return step.agent?.unless ? `skip if present: ${step.agent.unless}` : '';
 }
 function size(step) {
   const kind=kindOf(step), b=step[kind];
@@ -24,7 +32,8 @@ function size(step) {
 }
 
 /** Pure authoring renderer: no timestamps, randomness, file paths or model calls. */
-export function workflowDiagram(workflow) {
+export function workflowDiagram(data) {
+  const workflow=normalizeWorkflow(data);
   const cells=['<mxCell id="0"/>','<mxCell id="1" parent="0"/>'];
   let serial=1;
   const node=(value,kind,x,y,w,h,parent='1',extra='',role='step')=>{
@@ -41,11 +50,11 @@ export function workflowDiagram(workflow) {
       const group=node(label(step),kind,x,y,w,h,parent,'swimlane;startSize=60;horizontal=1;container=1;collapsible=0;');
       const first=node('loop entry',kind,w/2-50,75,100,30,group,'ellipse;','entry');
       let last=first,cy=145;
-      for(const inner of b.steps){const next=draw(inner,(w-size(inner).w)/2,cy,group);edge(last,next.entry,inner.agent?.unless ? `skip if present: ${inner.agent.unless}` : '','',group);last=next.exit;cy+=size(inner).h+60;}
+      for(const inner of b.steps){const next=draw(inner,(w-size(inner).w)/2,cy,group);edge(last,next.entry,condition(inner),'',group);last=next.exit;cy+=size(inner).h+60;}
       const end=node('check until',kind,w/2-60,h-45,120,30,group,'rhombus;','condition');
       edge(last,end,'','',group);
-      const condition=`until ${b.until.step}.${b.until.field} = ${JSON.stringify(b.until.equals)}; max ${b.max}`;
-      edge(end,first,`repeat while false · ${condition}`,'exitX=1;exitY=0.5;entryX=1;entryY=0.5;',group,`<Array as="points"><mxPoint x="${w-20}" y="${h-30}"/><mxPoint x="${w-20}" y="90"/></Array>`);
+      const until=`until ${b.until.step}.${b.until.field} = ${JSON.stringify(b.until.equals)}; max ${b.max}`;
+      edge(end,first,`repeat while false · ${until}`,'exitX=1;exitY=0.5;entryX=1;entryY=0.5;',group,`<Array as="points"><mxPoint x="${w-20}" y="${h-30}"/><mxPoint x="${w-20}" y="90"/></Array>`);
       return {entry:first,exit:end};
     }
     if(kind==='parallel') {
@@ -63,7 +72,7 @@ export function workflowDiagram(workflow) {
   const width=Math.max(660,Math.max(420,...workflow.steps.map((s)=>size(s).w))+160);
   node(`Workflow · budget: ${workflow.budget.calls} calls`,'title',20,20,width-40,50,'1','fontSize=20;strokeColor=none;','title');
   let last=node('Start','start',width/2-60,100,120,45,'1','ellipse;','start'),y=205;
-  for(const step of workflow.steps){const next=draw(step,(width-size(step).w)/2,y,'1');edge(last,next.entry,step.agent?.unless ? `skip if present: ${step.agent.unless}` : '');last=next.exit;y+=size(step).h+100;}
+  for(const step of workflow.steps){const next=draw(step,(width-size(step).w)/2,y,'1');edge(last,next.entry,condition(step));last=next.exit;y+=size(step).h+100;}
   const end=node('End','end',width/2-60,y,120,45,'1','ellipse;','end');edge(last,end);y+=100;
   Object.keys(colors).forEach((kind,i)=>node(kind,kind,20+i*100,y,95,35,'1','fontSize=12;','legend'));
   return `<?xml version="1.0" encoding="UTF-8"?>\n<mxfile><diagram id="workflow" name="Workflow"><mxGraphModel grid="1" gridSize="10" page="0" pageWidth="${width}" pageHeight="${y+80}"><root>\n${cells.map((c)=>'  '+c).join('\n')}\n</root></mxGraphModel></diagram></mxfile>\n`;

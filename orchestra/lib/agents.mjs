@@ -5,7 +5,7 @@ import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { prepareBrief } from './context.mjs';
-import { jsonObjects } from './util.mjs';
+import { childEnv, jsonObjects } from './util.mjs';
 export const engineDir = dirname(dirname(fileURLToPath(import.meta.url)));
 const validName = (s) => /^[a-zA-Z0-9_-]+$/.test(s);
 export const adapterDirs = (root) => [join(root, '.orchestra/adapters'), join(homedir(), '.config/orchestra/adapters'), join(engineDir, 'adapters')];
@@ -65,7 +65,7 @@ export function adapterHelper(a, command, request) {
   writeFileSync(join(dir,'input'),JSON.stringify(request));
   const input=openSync(join(dir,'input'),'r'), output=openSync(join(dir,'output'),'w'), error=openSync(join(dir,'error'),'w');
   try {
-    const p=spawnSync(argv[0],argv.slice(1),{stdio:[input,output,error],timeout:65000});
+    const p=spawnSync(argv[0],argv.slice(1),{env:childEnv(),stdio:[input,output,error],timeout:65000});
     if(p.error || p.status!==0)throw new Error(`adapter helper failed: ${p.error?.message ?? readFileSync(join(dir,'error'),'utf8')}`);
     return JSON.parse(readFileSync(join(dir,'output'),'utf8'));
   } finally {closeSync(input);closeSync(output);closeSync(error);rmSync(dir,{recursive:true,force:true});}
@@ -105,7 +105,7 @@ async function executeAgent(agent,{brief,cwd,outDir:requested,readOnly=false,tim
     let child, timer, killer, timedOut=false, settled=false;
     const finish=(exitCode,error) => { if(settled)return; settled=true; clearTimeout(timer); clearTimeout(killer); live.delete(child); resolve({exitCode,error:timedOut ? 'agent timeout' : error}); };
     try {
-      child=spawn(argv[0],argv.slice(1),{cwd,env:process.env,stdio:[input,stdout,stderr],detached:true}); live.add(child);
+      child=spawn(argv[0],argv.slice(1),{cwd,env:childEnv(),stdio:[input,stdout,stderr],detached:true}); live.add(child);
       child.on('error',(e)=>finish(null,e.message)); child.on('exit',(code)=>finish(code));
       timer=setTimeout(()=>{timedOut=true;try{process.kill(-child.pid,'SIGTERM');}catch{}
         killer=setTimeout(()=>{try{process.kill(-child.pid,'SIGKILL');}catch{}},1000);

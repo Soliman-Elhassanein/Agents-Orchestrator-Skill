@@ -1,6 +1,6 @@
 {
   "name": "orchestra",
-  "version": "2.2.0",
+  "version": "3.0.0",
   "description": "Orchestrate agent CLIs through workflows: parallel work across vendors, cheap models for the bulk, quota balancing.",
   "type": "module",
   "bin": {
@@ -15,7 +15,7 @@
     "skills/"
   ],
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   },
   "scripts": {
     "test": "node test/e2e.mjs"
@@ -25,5 +25,9 @@
     "type": "git",
     "url": "https://github.com/Soliman-Elhassanein/Agents-Orchestrator-Skill.git"
   },
-  "author": "Soliman Elhassanein"
+  "author": "Soliman Elhassanein",
+  "dependencies": {
+    "@langchain/core": "1.2.17",
+    "@langchain/langgraph": "1.4.21"
+  }
 }

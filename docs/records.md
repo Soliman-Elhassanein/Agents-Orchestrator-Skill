@@ -26,7 +26,7 @@ quota, crash and stuck markers use the same keys as a later `watch`, preventing 
 | File | Writer | Contents |
 |---|---|---|
 | `run.json` | Runner | contract, taskFile, baseCommit, finalCommit, status, runtimeStatus, steps, tasks, gates, questions, tokens, calls, unavailable, suggestions |
-| `state.json` | Worker creates; runner updates | internal checkpoint, workflow snapshot, per-step outputs, lane branch/base/merge checkpoints, phase progress and question batch |
+| `state.json` | Worker creates; runner updates | internal checkpoint, workflow snapshot, per-step outputs, task branch/base/merge checkpoints (`branches`, keyed by task ID), phase progress and question batch |
 | `progress.md` | Runner | human view of state, questions, startup fixes and directions |
 | `task.md` | Worker | original request |
 | `tasks.md` | Engine plan | generated task list, checkboxes only change after merge and gates |
@@ -46,7 +46,7 @@ Task records contain `id`, `phase`, `status` (`executed`, `failed`, `skipped`), 
 commits and attempt count. `executed` is set only after merge and phase gates.
 Step records include status, attempts, token totals, structured output, actual changed files, diff path
 and commits for writes. Write calls record their own changed files, commits and diff;
-step `changes` and `commits` accumulate those facts without attributing other lanes’ merges
+step `changes` and `commits` accumulate those facts without attributing other tasks’ merges
 to the worker. `diff` points to the latest write patch and `diffs` retains all write patches.
 An empty write attempt has status `no-changes`; diagnosis and bounded retries precede
 stopping dependents if no real change results.
@@ -62,7 +62,15 @@ Internal statuses include `queued`, `running`, `awaiting_user`, `awaiting_quota`
 `runtimeStatus` distinguishes waiting. Status/check derive `crashed` from a dead worker;
 they never rewrite state. Reading a report never makes a model call.
 
-Worktrees live under Git's common directory. Unfinished lane branches survive stopping,
+Run IDs are the start date, time to the second and a random suffix, such as
+`20261026-142233-k3fq`; the run branch is `orchestra/<run-id>`. Work branches sit next to it
+as `orchestra/<run-id>.<step>.<part>`: a task branch ends in the task ID and the first words
+of its text (`….execute.T001-add-login-form`), a parallel child in `agent-<n>`. Inside a loop,
+the step part includes the iteration (`….rounds.0.propose.agent-1`). They are deleted when
+the run completes. Runs recorded before version 3 keep their earlier branch names, and a
+checkpoint's `lanes` field is read as `branches`.
+
+Worktrees live under Git's common directory. Unfinished task branches survive stopping,
 failure and crashes. Resume reattaches those branches and skips completed step checkpoints.
 A merge recorded by Git just before a crash is recognized by ancestry on resume.
 
@@ -108,7 +116,7 @@ ordinary worker calls omit it. These calls use read access at the highest config
 and count toward the same call budget and usage totals, including failed starts and retries.
 Their step checkpoints and artifacts use child keys such as `execute/plan`,
 `execute/phase-1/brief`, `task/brief`, `task/diagnosis-1` and `views/synthesis`.
-Lane phase briefs and revised task briefs are retained in internal step checkpoints for
+Phase briefs and revised task briefs are retained in internal step checkpoints for
 resume. Generated task lists stay in the run folder. Parallel block output retains `items`
 and adds `synthesis`; neither replaces the raw child outputs.
 

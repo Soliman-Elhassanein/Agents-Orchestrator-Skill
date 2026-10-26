@@ -1,4 +1,4 @@
-# Workflow format v2
+# Workflow format v3
 
 Workflows are JSON, with a `.json` extension. A pack contains `workflow.json` and prompt
 files. Search order is `.orchestra/workflows/<name>/workflow.json`, then
@@ -7,12 +7,12 @@ A `<name>.json` file in each folder also works. The first match wins.
 
 ```json
 {
-  "workflow": 2,
+  "workflow": 3,
   "description": "Compares two designs for a question. Give the question: orchestra run my-pack \"Files or a database for the cache?\". Returns the chosen option and why.",
   "budget": {"calls": 8},
   "steps": [
     {"id":"facts", "agent":{"prompt":"research.md", "tier":1, "access":"read"}},
-    {"id":"choices", "parallel":{"prompt":"propose.md", "tier":3,
+    {"id":"options", "parallel":{"prompt":"propose.md", "tier":3,
       "access":"read", "count":2, "distinct":"vendor", "sees":["facts"]}},
     {"id":"choose", "ask":{"questions":["Which option should proceed?"]}}
   ]
@@ -24,21 +24,65 @@ what the workflow does, what to give it, with one example `orchestra run` comman
 it returns. `orchestra workflow list` prints every workflow found in the search order with
 its source and description; `--json` gives the same as data.
 
-Version 1 is the same format without `description`. Orchestra still runs v1 packs, and
-`workflow list` shows them as having no description; add `description` and set
-`"workflow": 2` to upgrade one. The built-in authoring workflow only saves v2 packs.
+Version 3 adds routing (`when` and `choices`, below) and names the task-list block `tasks`.
+Version 2 is the same without routing, and its task-list block is called `lanes`. Version 1
+is version 2 without `description`; `workflow list` shows such packs as having no
+description. Orchestra still runs v1 and v2 packs. To upgrade one, add `description`, rename
+any `lanes` block to `tasks` and set `"workflow": 3`.
 
 A pack may also include a `README.md` guide that walks through a full run: an example
 session, what each step asks and the files it leaves. `workflow list` prints its path.
 Keep everything specific to a workflow in its pack, not in Orchestra's own docs.
 
-Each step has a unique `id` and exactly one of six blocks. No embedded functions or
-expressions are evaluated. Prompts are files relative to the pack. They receive the original
+Each step has a unique `id` and exactly one of six blocks, and in v3 an optional `when`.
+No embedded functions or expressions are evaluated. Prompts are files relative to the pack. They receive the original
 task, user answers and steering. Add `sees:["id"]` to expose only those earlier outputs.
 `sees:"previous"` exposes the previous step. Separate parallel calls never see siblings.
 `{{task}}`, `{{taskFile}}`, `{{runDir}}`, `{{workflowDir}}` and `{{steps.id.field}}` interpolate literal values
 in prompt text and declared input fields. A whole-field reference preserves its JSON type.
 Agents return JSON (bare or fenced); its fields are stored as `output` for later steps.
+
+## How a workflow runs
+
+Every run is a workflow: `orchestra run <workflow> "<task>"`. The engine compiles the
+workflow's data into a [LangGraph](https://github.com/langchain-ai/langgraphjs) state graph.
+Each step is a node. Step order and `when` routes are the edges. A loop is an entry node, its
+steps, and an `until` node that edges back to the loop's first step or on to the next step.
+The graph is fixed when the run starts: no agent can add, skip or reorder a step, and every
+path it can take is one the workflow author wrote down.
+
+The graph's own state holds only loop iterations. Orchestra's run record keeps each finished
+step, so `orchestra resume` replays the graph and finished steps return their recorded
+outputs without new calls. Orchestra turns off LangChain tracing in its own process, so no
+run data is sent to a tracing service; processes it starts still get your settings.
+
+## Routing
+
+A step can choose a path. Give an `agent` step `choices`, a field and the values it may
+return, and give later steps a `when` naming one of those values:
+
+```json
+{"id":"decide", "agent":{"prompt":"decide.md", "tier":3,
+  "choices":{"field":"action", "values":["fix", "rewrite", "ask"]}}},
+{"id":"fix", "when":{"step":"decide", "field":"action", "equals":"fix"},
+  "agent":{"prompt":"fix.md", "tier":1, "access":"write"}},
+{"id":"rewrite", "when":{"step":"decide", "field":"action", "equals":"rewrite"},
+  "agent":{"prompt":"rewrite.md", "tier":1, "access":"write"}},
+{"id":"ask", "when":{"step":"decide", "field":"action", "equals":"ask"},
+  "ask":{"questions":["What should change?"]}}
+```
+
+- **Only listed values route.** The engine tells the agent the allowed values in its brief.
+  An answer with any other value is a failed attempt: it gets the usual retry with the reason,
+  and if the retries run out the run fails. The engine never guesses a path.
+- **Checked before running.** A `when` must name an earlier step in the same list or before
+  an enclosing loop, that step must have `choices` with the same field, and `equals` must be
+  one of its values. Anything else is rejected when the workflow is loaded or checked.
+- **Recorded.** The chosen value is in that step's output in `run.json`; steps whose `when`
+  did not match have no record.
+- A step whose `when` does not match is passed over; the run continues with the next step.
+  Inside a loop each iteration routes from that iteration's choice.
+- Choices pick a path. They are not verdicts: a workflow never returns "done" or "accepted".
 
 ## Diagram
 
@@ -46,7 +90,8 @@ Every pack includes `workflow.drawio`, an uncompressed draw.io XML diagram gener
 from `workflow.json`. Open it in diagrams.net or the Draw.io extension in VS Code. It shows
 the call budget, ordered steps, block colours and legend, parallel agents between a fork and
 join, and bounded loop containers with their stop conditions. Labels include agent access,
-visibility and skip conditions, user questions, gate commands and lane execution order.
+visibility, choices, routes and skip conditions, user questions, gate commands and task-list
+execution order.
 
 Never edit the diagram by hand. Edit `workflow.json`, then regenerate:
 
@@ -94,17 +139,21 @@ installed copy; it rejects stale supplied diagrams. Source packs are left untouc
 - `loop`: `steps`, positive `max`, `until:{step,field,equals}`. Checks a structured field
   after each iteration; never interprets prose. The maximum is a hard bound; if the field
   never matches, the block stops with `exhausted` and dependent work does not start.
-- `lanes`: optional `taskFile` (explicit path, or `{{taskFile}}`), `tier` (default 1), `access:"write"`.
+- `agent` in v3 also takes `choices:{field, values}`; see [Routing](#routing).
+- `tasks` (`lanes` in v1 and v2): optional `taskFile` (explicit path, or `{{taskFile}}`),
+  `tier` (default 1), `access:"write"`.
   Without a task file from the block or run options, the engine makes a highest-tier,
   read-only plan call and saves its task-list text inside the run folder. This works with
-  `{"lanes":{}}`, without any planning step or installed built-in workflow.
+  `{"tasks":{}}`, without any planning step.
   Before each phase with workers below the highest tier, one engine brief call returns all
   task briefs as `{"briefs":{"T001":"..."}}`. Each brief specifies changes, files, steps and
   the check that proves the change. Workers receive their own briefs.
   Reads Markdown phases and task lines described below. Unticked tasks run by ascending
-  phase. Consecutive `[P]` tasks form independent lanes, bounded by configured fanout;
-  other tasks are sequential barriers. Lane branches survive interruption. Merge conflicts
-  redo the lane once on the merged tree. A second conflict waits for the user, without a
+  phase. Consecutive `[P]` tasks run at the same time, each on its own branch and worktree,
+  bounded by configured fanout; other tasks are sequential barriers. Task branches survive
+  interruption. A task branch is named after the run, step and task, for example
+  `orchestra/20261026-142233-k3fq.execute.T001-add-login-form`. Merge conflicts
+  redo the task once on the merged tree. A second conflict waits for the user, without a
   planning or resolution call. Every phase runs gates on its merged revision before ticking.
   A failed phase gate attributes the failure to the phase's tasks: diagnosis rewrites each
   task's brief and retries repair the merged tree before gates run again, within the same
@@ -120,7 +169,7 @@ why. Unknown quota stays unknown and keeps weight 1. Nothing falls back to a low
 
 ## Task lists and records
 
-Give the path explicitly to a workflow with a `lanes` block:
+Give the path explicitly to a workflow with a `tasks` block:
 `orchestra run <workflow> --task-file tasks.md --foreground`.
 Omit `--foreground` to start the worker and watch in the calling process until an attention
 event or periodic check-in; use `--detach` to return immediately with the run ID.
@@ -142,7 +191,7 @@ pass. Existing ticks are skipped. Unrecognized lines and original line endings s
 A tick reports execution and gates; it is no quality judgment.
 
 Run state checkpoints each finished step, parallel child and loop iteration. Resume skips
-finished steps and continues lane branches. `run.json` uses `contract:"run-report/1"`,
+finished steps and continues task branches. `run.json` uses `contract:"run-report/1"`,
 with task path, base/final commits, status, steps, tasks, commits, gates, questions and token
 totals. Gates include their tested revision. Missing usage is counted explicitly. Failed,
 stopped and waiting runs also have a current report.
@@ -156,9 +205,8 @@ workflow. A prompt starts with `ORCHESTRA ROLE: <role>` and `CYCLE: n` (the engi
 these headers when absent). The six blocks are closed; do not hide program code in workflow
 data. Gates may call ordinary project scripts.
 
-`orchestra run "task" --tier 2` runs one write agent with the same queue and records.
-Use `--access read` for a direct task that returns information without changing the project.
-`orchestra run <workflow> "task"` selects a workflow. Land with
+Every run names its workflow: `orchestra run <workflow> "task"`. Orchestra ships one
+built-in workflow, a single agent doing the task; `orchestra workflow list` shows it. Land with
 `orchestra land [run-id] <target-branch>`; a target is always required, including the default
 branch. Landing never pushes.
 
@@ -188,8 +236,10 @@ engine and original checkout for trusted gate scripts.
 Dry mode uses in-process mock outputs, automatic mock user answers and mock successful gates.
 It prints each block and parallel child, traverses every bounded loop iteration, and counts
 calls against the budget, including syntheses and conservative brief estimates for write
-calls (real highest-tier workers skip separate briefs). Lanes use one synthetic phase and
-task, with a plan call when no taskFile field is supplied. Real task-file availability,
+calls (real highest-tier workers skip separate briefs). A `tasks` block uses one synthetic
+phase and task, with a plan call when no taskFile field is supplied. A step with `choices`
+takes its first listed value, so dry mode follows one route and shows the other routed steps
+as skipped. Real task-file availability,
 phase counts, quota and retries can change the actual call count. It never invokes an adapter, command,
 quota reader or user question, and never writes files. This checks the bounded execution
 shape; real command exits and agent output contents still need an actual run.

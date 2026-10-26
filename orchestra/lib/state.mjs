@@ -14,7 +14,8 @@ export function runsDir(root) {
 export function newRunId() {
   const d = new Date();
   const pad = (n) => String(n).padStart(2, "0");
-  const stamp = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}${String(d.getMilliseconds()).padStart(3, "0")}`;
+  // Date, time to the second and a random suffix: 20261026-142233-k3fq. Runs sort by start time.
+  const stamp = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
   return `${stamp}-${Math.random().toString(36).slice(2, 6)}`;
 }
 
