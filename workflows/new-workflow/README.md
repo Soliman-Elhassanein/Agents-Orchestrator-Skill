@@ -21,7 +21,9 @@ else can add or skip a step.
      happens when a check fails, and **whether the path is fixed or an agent chooses at
      named points** (and between which options).
    - Two *reviewers* at tier 2, from different vendors when you have them, look
-     independently for gaps that would change the workflow's shape or safety.
+     independently for gaps the workflow can't be built without, at most three each.
+   - Nobody adds safeguards you didn't ask for. Failed checks, retries, budgets and loop
+     limits follow Orchestra's defaults unless you say otherwise.
    - A tier-3 agent shows you the summary and the gaps and asks you to confirm or correct
      them. It returns `understood: yes` or `no`; `no` starts another round.
 2. **Build** (up to 3 drafts).

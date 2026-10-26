@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+Changes:
+
+- `new-workflow` keeps designs as small as the user's description. The interviewer and the
+  reviewers no longer propose safeguards, scripts or limits the user didn't ask for, and
+  they treat Orchestra's defaults for failed checks, retries, budgets and loop limits as
+  settled. Reviewers raise at most three gaps, and every question recommends the simplest
+  option.
+
 ## 3.0.0 — 2026-10-26
 
 Breaking changes:

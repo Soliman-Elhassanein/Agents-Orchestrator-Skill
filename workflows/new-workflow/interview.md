@@ -19,9 +19,14 @@ Find out:
 5. Determinism, asked explicitly: should the path always be the same, or should an agent
    choose between named paths at certain points (for example fix, rewrite or ask)? For each
    such point, the options and what each one does.
-6. What the agents must never do, what evidence a step needs before it concludes, and what
-   happens when evidence is missing, a check fails or a loop runs out.
-7. Which checks a command can run (tests, linters, a script) instead of an agent's opinion.
+6. What the agents must never do, and what evidence a step needs before it concludes.
+7. Which existing commands (tests, linters) can check a step instead of an agent's opinion.
+
+Keep the design as small as the user's description. Never propose safeguards, scripts, limits
+or reserves the user did not ask for. Orchestra's defaults already answer failure questions:
+a failing gate stops the run (after repair retries in a `tasks` block), a failed step is diagnosed and retried, and the budget and loop
+`max` stop the run. Assume them and do not ask unless the user's words contradict them. When
+a question offers options, recommend the simplest one.
 
 If one agent could do the whole job in one call, say so in a question and ask whether the
 user still wants a workflow; if they insist, continue.
