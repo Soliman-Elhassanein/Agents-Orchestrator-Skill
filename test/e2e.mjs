@@ -262,6 +262,7 @@ const tests={
   },
   'step 3: adapter test --command compares the write sandbox with a direct run'() {
     const dir=project();
+    const doctor=orchRaw(dir,['doctor']);assert.equal(doctor.code,0);assert.match(doctor.out,/^ok small: .+ on PATH$/m);assert.doesNotMatch(doctor.out,/ok .*authenticate/);
     const works=orchRaw(dir,['adapter','test','mock','--command','test -f README.md']);
     assert.equal(works.code,0);assert.match(works.out,/mock: works; "test -f README.md" exits 0 inside the write sandbox and outside it/);
     const blocked=orchRaw(dir,['adapter','test','mock','--command','test -f README.md'],{MOCK_SANDBOX_BLOCK:'1'});

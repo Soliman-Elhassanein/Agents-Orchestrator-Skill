@@ -685,12 +685,12 @@ function cmdLand(args) {
 async function cmdDoctor() {
   const root = findProjectRoot();
   const cfg = loadConfig(root);
-  const check = (label, ok) => { console.log(`${ok ? "ok" : "missing"} ${label}`); if (!ok) process.exitCode = 1; };
+  const check = (label, ok, fix) => { console.log(`${ok ? "ok" : "missing"} ${label}${ok || !fix ? "" : `; fix: ${fix}`}`); if (!ok) process.exitCode = 1; };
   check("Node 20+", Number(process.versions.node.split(".")[0]) >= 20);
   check("git commit", g.git(root, ["rev-parse", "--verify", "HEAD"], { allowFail: true }).ok);
   for (const agent of allAgents(cfg)) {
     const a=loadAdapter(root,agent.cli);
-    check(`${agent.name}: install ${a.command[0]} and authenticate it`, spawnSync('which',[a.command[0]==='{node}'?process.execPath:a.command[0]],{stdio:'ignore'}).status===0);
+    check(`${agent.name}: ${a.command[0]} on PATH`, spawnSync('which',[a.command[0]==='{node}'?process.execPath:a.command[0]],{stdio:'ignore'}).status===0, `install ${a.command[0]} and authenticate it`);
   }
 }
 
