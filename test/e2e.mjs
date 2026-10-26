@@ -266,7 +266,7 @@ const tests={
     assert.equal(works.code,0);assert.match(works.out,/mock: works; "test -f README.md" exits 0 inside the write sandbox and outside it/);
     const blocked=orchRaw(dir,['adapter','test','mock','--command','test -f README.md'],{MOCK_SANDBOX_BLOCK:'1'});
     assert.equal(blocked.code,1);assert.match(blocked.out,/write sandbox blocks "test -f README.md": exit 1 inside, 0 outside/);
-    assert.match(blocked.out,/operation not permitted/);assert.match(blocked.out,/Fix: copy .*mock\.json to \.orchestra\/adapters\/mock\.json/);
+    assert.match(blocked.out,/operation not permitted/);assert.match(blocked.out,/Fix: edit .*mock\.json and allow/);
     const broken=orchRaw(dir,['adapter','test','mock','--command','test -f missing.txt'],{MOCK_CALL_LOG:join(dir,'calls.jsonl')});
     assert.equal(broken.code,1);assert.match(broken.out,/not tested; .* outside any sandbox too/);assert.ok(!existsSync(join(dir,'calls.jsonl')),'no agent call when the command fails directly');
     assert.equal(orchRaw(dir,['adapter','test','mock','--command']).code,1);
@@ -415,6 +415,9 @@ if(name==='agy')process.stdout.write('hello');
       for(const message of errors)assert.ok(spec.startup.some((r)=>new RegExp(r.pattern,'i').test(message)));
     }
     const original=loadAdapter(dir,'codex');assert.equal(original.dir,join(dir,'.orchestra/adapters'),'project override wins');
+    rmSync(join(dir,'.orchestra/adapters/codex.mjs'));
+    assert.throws(()=>loadAdapter(dir,'codex'),/adapter codex needs codex\.mjs next to/,'a copied adapter without its helper is refused');
+    cpSync(join(REPO,'orchestra/adapters/codex.mjs'),join(dir,'.orchestra/adapters/codex.mjs'));
   },
   async 'step 3: active quota readers preserve account windows and only request metadata'() {
     const dir=project(),{loadAdapter,adapterHelper}=await import(join(REPO,'orchestra/lib/agents.mjs'));
