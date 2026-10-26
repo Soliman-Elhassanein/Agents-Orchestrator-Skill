@@ -731,15 +731,17 @@ async function adapterCommandTest(root,cfg,agent,dir,command) {
       brief:`ORCHESTRA ROLE: adapter-command\nCYCLE: 1\nRun this shell command once from the current directory, exactly as written, then stop. Do not change, fix or retry anything.\nCOMMAND:\n${command}\nReturn JSON {"exit": its exit code as a number, "output": "the last 40 lines it printed"}.`});
     const output=result.output ?? {}, exit=Number.isInteger(output.exit)?output.exit:null;
     if(result.startup || result.status!=='completed' || exit===null) {
-      console.log(`${agent.cli}: failed; the agent ran but reported no exit code; exit ${result.exitCode ?? 'unknown'}; logs ${result.outDir}`);
+      console.log(`${agent.cli}: failed; no exit code was read from the agent; exit ${result.exitCode ?? 'unknown'}; logs ${result.outDir}`);
+      if(result.error)console.log(`Error: ${result.error.split('\n').slice(0,3).join(' ').trim()}`);
       if(result.startup)console.log(`Fix: ${result.startup.fix}`);
       process.exitCode=1;return;
     }
     if(exit===0) {console.log(`${agent.cli}: works; "${command}" exits 0 inside the write sandbox and outside it; logs ${result.outDir}`);return;}
-    let adapter;try{adapter=join(loadAdapter(root,agent.cli).dir,`${agent.cli}.json`);}catch{adapter=`${agent.cli}.json`;}
+    let adapter,helpers=[],project=false;
+    try{const a=loadAdapter(root,agent.cli);adapter=join(a.dir,`${agent.cli}.json`);project=a.dir===join(root,'.orchestra/adapters');helpers=readdirSync(a.dir).filter((f)=>f.startsWith(`${agent.cli}.`) && f!==`${agent.cli}.json`);}catch{adapter=`${agent.cli}.json`;}
     console.log(`${agent.cli}: write sandbox blocks "${command}": exit ${exit} inside, 0 outside; logs ${result.outDir}, ${log}`);
     if(typeof output.output==='string' && output.output.trim())console.log(`Agent output:\n${output.output.trim().split('\n').slice(-40).join('\n')}`);
-    console.log(`Fix: copy ${adapter} to .orchestra/adapters/${agent.cli}.json and allow only what the output above shows the command needs in its "write" flags, then run this test again.`);
+    console.log(`Fix: ${project?`edit ${adapter}`:`copy ${adapter}${helpers.length?` and ${helpers.join(', ')} from the same folder`:''} to .orchestra/adapters/,`} and allow only what the output above shows the command needs in its "write" flags, then run this test again.`);
     process.exitCode=1;
   } finally {g.removeWorktree(root,inside);}
 }

@@ -153,7 +153,7 @@ orchestra adapter test codex --command "npm test"
 
 Orchestra runs the command itself, then has the agent run it inside its write sandbox, and
 prints both exit codes. If only the sandboxed run fails, it shows the agent's output and the
-adapter file to copy into `.orchestra/adapters/`; allow only what the output shows the
+adapter files to copy into `.orchestra/adapters/`; allow only what the output shows the
 command needs. See [When the sandbox blocks your tools](docs/adapters.md#when-the-sandbox-blocks-your-tools).
 
 ### 2. Run one task

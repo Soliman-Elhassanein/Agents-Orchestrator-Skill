@@ -9,6 +9,11 @@ Changes:
   the workflow stops a run, it reads the machine knowledge, fixes the cause on its own,
   checks the fix, records the lesson and resumes. It waits for you only on decisions. The
   skill says which CLI the operator is, and lists what it fixes and what it asks.
+- A copied adapter must bring the helper files it names as `{adapterDir}/…`. Orchestra now
+  refuses one whose helpers are missing, and names the file to copy, instead of failing every
+  call with an empty reply. `adapter test --command` prints the error when it reads no exit
+  code, lists the helper files to copy, and says to edit a project adapter rather than copy
+  it onto itself.
 - `operatorUpdateMinutes` replaces `communicatorUpdateMinutes`; the old key still works.
 
 - `new-workflow` keeps designs as small as the user's description. The interviewer and the

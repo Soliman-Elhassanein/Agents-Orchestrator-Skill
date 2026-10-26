@@ -99,6 +99,7 @@ flags and asks it to run the command once and report the exit code. It prints `w
 call and judges nothing; it reports the two exit codes.
 
 To fix a block, copy the adapter it names to `.orchestra/adapters/<name>.json` (the project
-copy wins) and change only its `write` flags to allow what the output shows, such as local
+copy wins), together with every helper file it names as `{adapterDir}/…`, such as
+`<name>.mjs`; Orchestra refuses an adapter whose helpers are missing. Change only its `write` flags to allow what the output shows, such as local
 network access or one extra writable folder. Your CLI's sandbox documentation names the
 setting. Keep the rest of the sandbox, then run the test again.

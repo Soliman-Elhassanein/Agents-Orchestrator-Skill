@@ -20,6 +20,9 @@ export function loadAdapter(root, name) {
   for(const v of [a.prompt.args,...Object.values(a.flags ?? {}),a.reader,a.quota,a.transcript].filter((v)=>v!==undefined))if(!argv(v))throw new Error(`adapter arguments must be string arrays: ${file}`);
   if(!a.executable && !a.reader && !['text','json','jsonl'].includes(a.result?.format))throw new Error(`adapter result format required: ${file}`);
   for(const rule of a.startup ?? []) {new RegExp(rule.pattern);if(!rule.fix)throw new Error(`startup classification needs a fix: ${file}`);}
+  // A copied adapter must bring the helper files it names next to it.
+  const helpers=[a.command,a.prompt.args,...Object.values(a.flags ?? {}),a.reader,a.quota,a.transcript].flat().filter((s)=>typeof s==='string' && s.startsWith('{adapterDir}/'));
+  for(const helper of new Set(helpers))if(!existsSync(join(dirname(file),helper.slice('{adapterDir}/'.length))))throw new Error(`adapter ${name} needs ${helper.slice('{adapterDir}/'.length)} next to ${file}; copy it from the adapter you started from`);
 
   return { ...a, dir:dirname(file), name };
 }
