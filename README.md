@@ -28,8 +28,9 @@ Orchestra is not a judge: it reports facts about calls, commits, gate exits and 
 You
   |  ^
   v  |  briefs and questions
-Your agent CLI: the communicator
-  picks a workflow, relays questions and answers
+Your agent CLI: the operator
+  picks a workflow, relays questions and answers,
+  fixes what stops a run and resumes it
   |  ^
   |  |  events: questions, done, failed, waiting
   v  |
@@ -375,8 +376,14 @@ observations). Notes are advice; recording makes no additional model calls.
 
 ## Using it from your agent
 
-Your agent CLI is the communicator: you talk to it, it starts workflows and relays
-Orchestra's questions to you. The [standard skill](skills/orchestra/SKILL.md) compares your
+Your agent CLI is the operator: you talk to it, it starts workflows, relays Orchestra's
+questions to you, and keeps runs going. When something outside the workflow stops a run (an
+adapter, the sandbox, quota, the install), it reads the machine knowledge, fixes the cause,
+checks the fix, records what it learned and resumes the run. It does that on its own, and
+waits for you only on decisions: the run's own questions, wider access than a command needs,
+installs and logins, deletions, changes to code, specs, workflows or tiers, and commits or
+pushes. It never runs workflow steps or declares work done; the engine runs the steps. The
+[standard skill](skills/orchestra/SKILL.md) compares your
 job with available workflows. It chooses a fitting workflow, or the built-in single-agent
 workflow when none fits. If the job seems too simple and one agent could do it directly,
 the skill explains that and asks you. If you insist, it runs
@@ -388,7 +395,7 @@ through Orchestra. An answer already given is honored without asking again.
 | `orchestra run …` | Starts a background worker and watches by default. |
 | `--detach` | Returns immediately with the reserved run ID. |
 | `orchestra watch` | Reattaches until an event or a periodic check-in. |
-| `--every <minutes>` | Check-in interval for `run` or `watch`; default 15 (`communicatorUpdateMinutes`). `--every 0` disables check-ins. |
+| `--every <minutes>` | Check-in interval for `run` or `watch`; default 15 (`operatorUpdateMinutes`; the old name `communicatorUpdateMinutes` still works). `--every 0` disables check-ins. |
 | `--stuck-after <minutes>` | Quiet-work warning interval; default 10 (`stuckAfterMinutes`). |
 | `--foreground` | Processes the queue in the calling process, without watching, using its execution exit codes. |
 
@@ -477,6 +484,13 @@ A failed run holds the queue unless `queue.holdOnFailure` is false. By default q
 build on the last completed run before landing; `queue.buildOnPrevious:false` starts from
 the checkout. Questions go to the user and all numbered answers must be supplied. Steering
 applies at the next boundary. `watch`, `check` and quota readers make no model calls.
+
+## Deferred
+
+- **A built-in workflow for fixing failed runs.** The operator fixes what stops a run with a
+  checklist in the skill. A workflow's agents run inside the same sandbox that often causes
+  the failure, and the operator sees the whole machine and can ask you. Waits on a real case
+  the operator couldn't fix alone.
 
 ## Development
 

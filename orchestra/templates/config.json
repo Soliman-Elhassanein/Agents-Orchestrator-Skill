@@ -1,7 +1,7 @@
 {
   "version": "orchestra.v2-adapters/1",
   "heartbeatMinutes": 15,
-  "communicatorUpdateMinutes": 15,
+  "operatorUpdateMinutes": 15,
   "stuckAfterMinutes": 10,
   "fanout": {
     "executors": 3

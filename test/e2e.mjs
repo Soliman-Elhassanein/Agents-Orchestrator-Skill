@@ -224,7 +224,7 @@ const tests={
     waitFor(()=>state(quota).status==='stopped','stop waiting run');
   },
   'run watches: check-in and stuck flags reuse watcher options and config defaults'() {
-    const progress=project({communicatorUpdateMinutes:0.003,stuckAfterMinutes:0});
+    const progress=project({operatorUpdateMinutes:0.003,stuckAfterMinutes:0});
     const tick=orchRaw(progress,['run','solo','slow task'],{MOCK_DELAY:'1800'});
     assert.equal(tick.code,0);assert.match(tick.out,/EVENT progress/);
     waitFor(()=>state(progress).status==='completed','check-in completion');

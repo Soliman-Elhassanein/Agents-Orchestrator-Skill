@@ -179,7 +179,7 @@ Omit `--foreground` to start the worker and watch in the calling process until a
 event or periodic check-in; use `--detach` to return immediately with the run ID.
 After handling a question or another event, re-attach with `orchestra watch`.
 Both watching commands accept `--every <minutes>` and `--stuck-after <minutes>`, using
-`communicatorUpdateMinutes` and `stuckAfterMinutes` from config by default. They make no
+`operatorUpdateMinutes` and `stuckAfterMinutes` from config by default. They make no
 model calls while waiting and exit 0 for handled events. Foreground execution does not watch.
 
 ```markdown

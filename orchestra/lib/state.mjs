@@ -1,6 +1,6 @@
 /**
  * Run records. `state.json` is the machine-readable truth; `progress.md` is the human view the
- * Communicator reads back to the user; `events.jsonl` is the append-only log.
+ * operator reads back to the user; `events.jsonl` is the append-only log.
  */
 import { spawn } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
