@@ -12,8 +12,8 @@ Breaking changes:
   question you until the use case is clear, including whether the path is fixed or an agent
   chooses at named points; then it drafts, checks, draws (draw.io and a text outline),
   dry-runs, lets you ask for changes, and saves only on an exact approval. The `code` and
-  `council` built-ins (with its modes) are removed; they remain in the
-  `archive/pre-langgraph` tag.
+  `council` built-ins (with its modes) are removed; they remain in the history at
+  commit `f8f5f72`.
 - Node 20 or newer. LangGraph (`@langchain/langgraph` 1.4.21 with `@langchain/core` 1.2.17)
   is the one dependency, pinned exactly. `orchestra init` links the project's engine copy to
   it; run `init` again after updating Orchestra.
