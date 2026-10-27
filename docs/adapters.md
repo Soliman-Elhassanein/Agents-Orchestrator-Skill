@@ -24,7 +24,7 @@ No core change or package installation is needed.
 ```
 
 Add an agent entry to `.orchestra/config.json`:
-`"small": {"cli":"my-tool","model":"small","tier":1,"weight":1}`.
+`"small": {"cli":"my-tool","model":"small","tier":1}`.
 Run `orchestra adapter test my-tool` for one short read-only call. It spends a small call
 on the configured model; tests in this repository use only a mock.
 

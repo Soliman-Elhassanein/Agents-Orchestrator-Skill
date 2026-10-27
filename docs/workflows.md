@@ -169,7 +169,7 @@ all workflow packs. Strong calls are text-only, read-only and quota-balanced at 
 configured tier; they wait for its quota without falling to a lower tier. Workflow fields
 cannot disable them. `run.json` records each strong call's `purpose`. `parallel` reserves distinct entries before dispatch.
 If no eligible entry has quota at or above the requested tier, the step waits and reports
-why. Unknown quota stays unknown and keeps weight 1. Nothing falls back to a lower tier.
+why. Unknown quota stays unknown and keeps factor 1. Nothing falls back to a lower tier.
 
 ## Task lists and records
 

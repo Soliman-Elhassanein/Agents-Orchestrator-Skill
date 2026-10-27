@@ -274,15 +274,15 @@ const tests={
     assert.equal(sh(dir,'git',['worktree','list']).trim().split('\n').length,1,'probe worktrees are removed');
   },
   'step 3: startup handover stays at the same tier, records exact fixes, never diagnoses startup failures'() {
-    const agents={bad:{cli:'mock',model:'broken',tier:2,weight:100000},good:{cli:'mock',model:'good',tier:2,weight:0.00001},strong:{cli:'mock',model:'strong',tier:3}};
-    const dir=project({agents});orch(dir,['run','solo','one task','--foreground'],{MOCK_STARTUP:'broken'});
+    const agents={bad:{cli:'mock',model:'broken',tier:2},good:{cli:'mock',model:'good',tier:2},strong:{cli:'mock',model:'strong',tier:3}};
+    const dir=project({agents});orch(dir,['run','solo','one task','--foreground'],{MOCK_STARTUP:'broken,good',MOCK_STARTUP_ONCE:join(dir,'.orchestra/startup-once')});
     const s=state(dir),r=report(dir);assert.equal(s.status,'completed',s.error);assert.equal(r.tokens.calls,3);
-    assert.equal(r.calls[1].status,'startup-failed');assert.equal(r.calls[2].entry,'good');
-    assert.equal(r.calls.filter(c=>c.purpose==='diagnosis').length,0);assert.equal(s.steps.task.failures,0);assert.match(s.unavailable.bad.fix,/Repair/);
+    const failed=r.calls[1].entry;assert.equal(r.calls[1].status,'startup-failed');assert.equal(r.calls[2].entry,failed==='bad'?'good':'bad');
+    assert.equal(r.calls.filter(c=>c.purpose==='diagnosis').length,0);assert.equal(s.steps.task.failures,0);assert.match(s.unavailable[failed].fix,/Repair/);
     assert.doesNotMatch(readFileSync(join(dir,'.orchestra/runs',s.id,r.calls[2].log,'brief.md'),'utf8'),/Previous attempt/);
     assert.ok(!existsSync(join(dir,'.orchestra/runs',s.id,r.calls[1].log,'unfinished.patch')));
   },
-  'step 3: model tiers use quota weights, go up when empty and never down'() {
+  'step 3: model tiers use quota pace, go up when empty and never down'() {
     const dir=project();writeFileSync(join(dir,'.orchestra/quota.json'),JSON.stringify({providers:{mock:{limitReached:'limit',observedAt:new Date().toISOString(),windows:[]},up:{windows:[{name:'weekly',usedPercent:10}]}}}));
     const file=join(dir,'.orchestra/config.json'),cfg=JSON.parse(readFileSync(file));cfg.agents.strong.quotaFrom='up';writeFileSync(file,JSON.stringify(cfg));
     orch(dir,['run','solo','one task','--foreground']);const r=report(dir);assert.equal(r.calls[0].entry,'strong');assert.equal(r.tokens.calls,1);
@@ -478,10 +478,10 @@ require('node:fs').writeSync(1,'Gemini Models\\tFive Hour limit remaining\\t75%\
     } finally {if(oldServer===undefined)delete process.env.ORCHESTRA_CODEX_BIN;else process.env.ORCHESTRA_CODEX_BIN=oldServer;if(oldUsage===undefined)delete process.env.ORCHESTRA_AGY_BIN;else process.env.ORCHESTRA_AGY_BIN=oldUsage;}
   },
   'step 4: named agents and distinct vendors survive startup fallback; project workflows override built-ins'() {
-    const dir=project({agents:{bad:{cli:'mock',model:'broken',tier:3,weight:100000},good:{cli:'mock',model:'good',tier:3,weight:0.00001},other:{cli:'other',model:'other',tier:3}}});
+    const dir=project({agents:{bad:{cli:'mock',model:'broken',tier:3},good:{cli:'mock',model:'good',tier:3},other:{cli:'other',model:'other',tier:3}}});
     cpSync(join(dir,'.orchestra/adapters/mock.json'),join(dir,'.orchestra/adapters/other.json'));
     workflow(dir,'independent',[{id:'views',parallel:{prompt:'read.md',tier:3,count:2,distinct:'vendor'}}]);
-    orch(dir,['run','independent','compare','--foreground'],{MOCK_STARTUP:'broken'});const r=report(dir);assert.equal(r.status,'completed',state(dir).error);
+    orch(dir,['run','independent','compare','--foreground'],{MOCK_STARTUP:'broken,good',MOCK_STARTUP_ONCE:join(dir,'.orchestra/startup-once')});const r=report(dir);assert.equal(r.status,'completed',state(dir).error);
     const children=['views/0','views/1'].map((k)=>r.steps[k]);assert.equal(new Set(children.map((e)=>e.cli)).size,2);assert.equal(r.tokens.calls,4);
     const override=project();workflow(override,'solo',[{id:'cheap',agent:{prompt:'read.md',agent:'small'}}]);orch(override,['run','solo','custom procedure','--foreground']);
     assert.equal(report(override).tokens.calls,1);assert.equal(report(override).calls[0].entry,'small');assert.equal(report(override).tasks.length,0);
@@ -508,13 +508,14 @@ require('node:fs').writeSync(1,'Gemini Models\\tFive Hour limit remaining\\t75%\
   },
   'step 5: direct read tasks return information; missing adapters hand over without planning'() {
     const read=project();reader(read);orch(read,['run','reader','explain the project','--foreground']);const r=report(read);assert.equal(r.tokens.calls,1);assert.equal(r.steps.task.status,'completed');assert.equal(r.finalCommit,r.baseCommit);
-    const dir=project({agents:{missing:{cli:'absent',tier:2,weight:100000},good:{cli:'mock',model:'good',tier:2,weight:0.00001}}});
-    orch(dir,['run','solo','one job','--foreground']);const out=report(dir);assert.equal(out.tokens.calls,2);assert.equal(out.calls[0].status,'startup-failed');assert.equal(out.calls[1].entry,'good');assert.match(state(dir).unavailable.missing.what,/not found/);
+    const dir=project({agents:{missing:{cli:'absent',tier:2},good:{cli:'mock',model:'good',tier:3}}});
+    orch(dir,['run','solo','one job','--foreground']);const out=report(dir);assert.deepEqual(out.calls.map(c=>c.purpose ?? c.status),['brief','startup-failed','completed']);assert.equal(out.calls[2].entry,'good');assert.match(state(dir).unavailable.missing.what,/not found/);
   },
   'source ships only three adapters, no relays; old config and malformed queue fail clearly'() {
     assert.equal(existsSync(join(REPO,'orchestra/relays')),false);assert.deepEqual(readdirSync(join(REPO,'orchestra/adapters')).filter((f)=>f.endsWith('.json')).sort(),['agy.json','claude.json','codex.json']);
     const dir=project();writeFileSync(join(dir,'.orchestra/queue.json'),'{ broken');assert.match(orchRaw(dir,['queue','add','solo','x']).err,/corrupt/);
     const cfgFile=join(dir,'.orchestra/config.json'),cfg=JSON.parse(readFileSync(cfgFile));cfg.roles={};writeFileSync(cfgFile,JSON.stringify(cfg));assert.match(orchRaw(dir,['run','solo','x','--foreground']).err,/unknown config option: roles/);
+    delete cfg.roles;cfg.agents.small.weight=2;writeFileSync(cfgFile,JSON.stringify(cfg));assert.match(orchRaw(dir,['run','solo','x','--foreground']).err,/agent small: weight was removed/);
   }
 };
 Object.assign(tests, {
@@ -690,12 +691,12 @@ Object.assign(tests, {
   },
   'machine knowledge: startup failures record once and reach the next brief for that CLI'() {
     const user=mkdtempSync(join(tmpdir(),'orchestra-startup-home-'));tmpRoots.push(user);const env={HOME:user,MOCK_STARTUP:'broken'};
-    const dir=project({agents:{bad:{cli:'mock',model:'broken',tier:2,weight:100000},good:{cli:'mock',model:'good',tier:2,weight:0.00001}}});reader(dir);
+    const dir=project({agents:{bad:{cli:'mock',model:'broken',tier:2},good:{cli:'mock',model:'good',tier:2}}});reader(dir);
     for(let n=0;n<2;n++) {
-      orch(dir,['run','reader','Explain','--foreground'],env);const r=report(dir);
+      orch(dir,['run','reader','Explain','--foreground'],{...env,MOCK_STARTUP:'broken,good',MOCK_STARTUP_ONCE:join(user,`startup-once-${n}`)});const r=report(dir);
       assert.equal(r.calls[0].status,'startup-failed');assert.equal(r.calls[1].status,'completed');
       const items=JSON.parse(orch(dir,['knowledge','--json'],env)).items;assert.equal(items.length,1);assert.equal(items[0].trusted,false);assert.equal(items[0].cli,'mock');
-      assert.equal(items[0].text,`cannot start. Fix: ${r.unavailable.bad.fix}`);
+      assert.equal(items[0].text,`cannot start. Fix: ${Object.values(r.unavailable)[0].fix}`);
       const brief=readFileSync(join(dir,'.orchestra/runs',state(dir).id,r.calls[1].log,'brief.md'),'utf8');assert.ok(brief.includes(`[observed] ${items[0].text}`));
     }
     assert.equal(existsSync(join(dir,'.orchestra/knowledge.json')),false);

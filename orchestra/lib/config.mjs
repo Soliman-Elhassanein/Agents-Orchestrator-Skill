@@ -24,7 +24,7 @@ export function validateConfig(cfg) {
   else for (const [name,a] of Object.entries(cfg.agents)) {
     if (!/^[a-zA-Z0-9_-]+$/.test(name) || !a || typeof a.cli !== 'string' || !/^[a-zA-Z0-9_-]+$/.test(a.cli)) errors.push('agent needs a valid name and cli');
     if (!posInt(a?.tier)) errors.push('agent tier must be positive');
-    if (a?.weight !== undefined && !(Number.isFinite(a.weight) && a.weight > 0)) errors.push('agent weight must be positive');
+    if (a?.weight !== undefined) errors.push(`agent ${name}: weight was removed; delete it, quota pace sets each agent's share`);
     for (const k of ['model','effort','quotaFrom']) if(a?.[k] !== undefined && (typeof a[k] !== 'string' || !a[k]))errors.push(`agent ${k} must be a string`);
     if(Object.keys(a ?? {}).some((k)=>!['cli','model','effort','tier','weight','quotaFrom'].includes(k)))errors.push('unknown agent option');
   }

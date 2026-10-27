@@ -1,11 +1,13 @@
-import { readFileSync, writeFileSync, mkdirSync, appendFileSync, readdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, appendFileSync, readdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 const args=process.argv.slice(2), opt=(s)=>args[args.indexOf(s)+1], env=process.env;
 const brief=readFileSync(opt('--brief'),'utf8'), out=opt('--out-dir'), model=args.includes('--model')?opt('--model'):'default';
 const title=/SUBTASK:\n(.+)/.exec(brief)?.[1] ?? 'direct';
 const role=/ORCHESTRA ROLE: (.*)/.exec(brief)?.[1];
-if((env.MOCK_STARTUP ?? '').split(',').includes(model)) {
+// MOCK_STARTUP_ONCE names a marker file: only the first listed model to be called fails to start.
+if((env.MOCK_STARTUP ?? '').split(',').includes(model) && !(env.MOCK_STARTUP_ONCE && existsSync(env.MOCK_STARTUP_ONCE))) {
+  if(env.MOCK_STARTUP_ONCE)writeFileSync(env.MOCK_STARTUP_ONCE,model);
   process.stderr.write(env.MOCK_STARTUP_ERROR ?? 'permission denied: headless cannot prompt');
   process.stdout.write(JSON.stringify({status:'failed',finalMessage:'',tokens:null}));process.exit(1);
 }

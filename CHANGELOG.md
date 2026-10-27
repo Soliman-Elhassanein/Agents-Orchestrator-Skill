@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+Breaking:
+
+- Agent weights are removed. Each entry's share of the work in its tier now comes only from
+  its quota pace, so every subscription drains evenly and no hand-set number overrides it.
+  A config whose agent has `weight` fails with `agent <name>: weight was removed; delete it`;
+  delete the field. The built-in agy adapter no longer suggests `weight: 2` for flash.
+  Constitution 2.2.1 words promise 2 as shares by pace.
+
 Changes:
 
 - Constitution 2.2.0: the agent CLI you talk to is now the operator, not the communicator.
