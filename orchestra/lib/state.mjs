@@ -19,6 +19,22 @@ export function newRunId() {
   return `${stamp}-${Math.random().toString(36).slice(2, 6)}`;
 }
 
+// Some filesystems (FUSE, network drives) replace a file by rename in two steps, so a reader
+// can briefly find state.json missing or partial. Readers retry for up to two seconds.
+const pause = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+export function readState(root, id, tries = 40) {
+  const path = join(runsDir(root), id, "state.json");
+  for (let i = 1; ; i++) {
+    try { return JSON.parse(readFileSync(path, "utf8")); }
+    catch (e) { if (i >= tries || !(e.code === "ENOENT" || e instanceof SyntaxError)) throw e; pause(50); }
+  }
+}
+const hasState = (dir) => existsSync(join(dir, "state.json")) || existsSync(join(dir, "state.json.tmp"));
+export function runExists(root, id) {
+  if (!hasState(join(runsDir(root), id))) return false;
+  try { readState(root, id); return true; } catch { return false; }
+}
+
 function writeAtomic(path, text) {
   const tmp = `${path}.tmp`;
   writeFileSync(tmp, text);
@@ -42,8 +58,7 @@ export class RunState {
 
   static load(root, id) {
     const dir = join(runsDir(root), id);
-    const data = JSON.parse(readFileSync(join(dir, "state.json"), "utf8"));
-    return new RunState(root, id, data);
+    return new RunState(root, id, readState(root, id));
   }
 
   path(...parts) {
@@ -72,10 +87,10 @@ export function listRuns(root) {
   if (!existsSync(dir)) return [];
   // Oldest first, by start time (ids alone can tie within a second on older runs).
   const started = (id) => {
-    try { return JSON.parse(readFileSync(join(dir, id, "state.json"), "utf8")).startedAt ?? ""; } catch { return ""; }
+    try { return readState(root, id).startedAt ?? ""; } catch { return ""; }
   };
   return readdirSync(dir)
-    .filter((id) => existsSync(join(dir, id, "state.json")))
+    .filter((id) => hasState(join(dir, id)))
     .map((id) => [id, started(id)])
     .sort((a, b) => (a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : a[0] < b[0] ? -1 : 1))
     .map(([id]) => id);
