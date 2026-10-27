@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { normalizeWorkflow } from '../lib/workflows.mjs';
 
-const colors = { agent:'#dae8fc', parallel:'#e1d5e7', ask:'#fff2cc', gate:'#d5e8d4', loop:'#ffe6cc', tasks:'#f8cecc' };
+const colors = { agent:'#dae8fc', parallel:'#e1d5e7', ask:'#fff2cc', gate:'#d5e8d4', loop:'#ffe6cc', checklist:'#f8cecc' };
 const kindOf = (step) => Object.keys(colors).find((kind) => step[kind]);
 const xml = (value) => String(value).replace(/[&<>"'\r\n]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;','\r':'&#13;','\n':'&#10;'}[c]));
 const selection = (b) => `${b.agent ? `agent: ${b.agent}` : `tier: ${b.tier ?? 2}`} · access: ${b.access ?? 'read'}`;
@@ -15,7 +15,7 @@ function label(step) {
   if(kind==='agent' && b.access==='write')lines.push('engine brief below highest tier; diagnosis before retry');
   if(kind==='ask')lines.push('you answer');
   if(kind==='gate')lines.push(b.command);
-  if(kind==='tasks')lines.push('engine plan if no task file; one brief call per phase below highest tier','phases in order, [P] tasks in parallel worktrees, merge, gates','engine diagnosis before task retries');
+  if(kind==='checklist')lines.push('engine plan if no task file; one brief call per phase below highest tier','phases in order, [P] tasks in parallel worktrees, merge, gates','engine diagnosis before task retries');
   if(kind==='loop')lines.push(`max: ${b.max}`);
   return lines.join('\n');
 }
@@ -89,7 +89,7 @@ export function workflowOutline(data) {
     if(b.choices)parts.push(`chooses ${b.choices.field}: ${b.choices.values.join(' | ')}`);
     if(kind==='ask')parts.push('waits for your answer');
     if(kind==='gate')parts.push(`runs: ${b.command}`);
-    if(kind==='tasks')parts.push('runs a task list on task branches, merges, runs gates');
+    if(kind==='checklist')parts.push('runs a checklist on task branches, merges, runs gates');
     if(kind==='loop')parts.push(`repeats until ${b.until.step}.${b.until.field} = ${JSON.stringify(b.until.equals)}, at most ${b.max} times`);
     if(step.when)parts.push(`only when ${step.when.step}.${step.when.field} = ${JSON.stringify(step.when.equals)}`);
     lines.push(`${at}${parts.length ? ` — ${parts.join('; ')}` : ''}`);

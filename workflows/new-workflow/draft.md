@@ -15,7 +15,7 @@ Follow the user's routing choice exactly:
 Use the fewest steps that do the job: a single agent step when one agent can, a `parallel`
 block only for independent views, an `ask` for each decision that belongs to the user, a
 `gate` for anything a command can check, a bounded `loop` with a structured stop field for
-repetition, and a `tasks` block for task lists. Cheap tiers do the bulk; tier 3 plans,
+repetition, and a `checklist` block for task lists. Cheap tiers do the bulk; tier 3 plans,
 critiques and synthesizes. Give `sees` only the earlier outputs a step needs. Write each
 prompt so it states its role, what to return as JSON, what it must never do, and what to do
 when evidence is missing.

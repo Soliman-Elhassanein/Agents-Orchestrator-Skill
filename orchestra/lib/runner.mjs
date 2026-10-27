@@ -280,7 +280,7 @@ class Runtime {
       this.prompt(b,'synthesis')+'\nIndependent outputs:\n'+JSON.stringify(output));
     return {items:output,synthesis};
   }
-  async tasks(b,key) {
+  async checklist(b,key) {
     const entry=this.s.steps[key] ??= {status:'running'};entry.phases ??=[];
     // Runs recorded before the rename keep their task branches.
     entry.branches ??=entry.lanes ?? {};delete entry.lanes;
@@ -406,7 +406,7 @@ class Runtime {
     } else if(k==='parallel')output=await this.parallel(b,key);
     else if(k==='ask')output=await this.ask(key,b.questions?.map((q)=>this.interpolate(q)) ?? [this.interpolate(readFileSync(join(this.workflow.dir,b.prompt),'utf8'))]);
     else if(k==='gate')output=await this.checkedGates(()=>this.gate(this.interpolate(b.command),key),this.lastWriters);
-    else if(k==='tasks')output=await this.tasks(b,key);
+    else if(k==='checklist')output=await this.checklist(b,key);
     this.complete(k,b,key,e,step.id,output);
   }
   complete(k,b,key,e,id,output) {

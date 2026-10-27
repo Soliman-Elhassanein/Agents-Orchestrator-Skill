@@ -12,6 +12,9 @@ Breaking:
 
 Changes:
 
+- The block that runs a task list is now called `checklist`, so it no longer shares a name
+  with Spec Kit's `tasks` step. Workflows that say `tasks` (or `lanes` in v1 and v2) still
+  load unchanged; `orchestra workflow diagram` draws the new name.
 - Constitution 2.2.0: the agent CLI you talk to is now the operator, not the communicator.
   Besides starting runs and relaying questions, it keeps runs going: when something outside
   the workflow stops a run, it reads the machine knowledge, fixes the cause on its own,
