@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, openSync, closeSync, readFileSync, writeFileSync
 import { join, resolve, relative, isAbsolute } from 'node:path';
 import * as g from './git.mjs';
 import { loadConfig, parseDuration } from './config.mjs';
-import { runAgent, stopAllAgents, extractJson, engineDir, quotaKey, pickWeighted, describeAgent } from './agents.mjs';
+import { runAgent, stopAllAgents, extractJson, engineDir, quotaKey, pickByShare, describeAgent } from './agents.mjs';
 import { balanceFactors, balanceOptions } from './balance.mjs';
 import { loadQuota, refreshQuota, saveObservation } from './quota.mjs';
 import { attemptSummary } from './digest.mjs';
@@ -95,8 +95,8 @@ class Runtime {
       let eligible=this.agents.filter((a)=>fits(a) && !omitted.has(a.cli));
       if(!eligible.length && omitted.size)eligible=this.agents.filter(fits);
       for(const tier of [...new Set(eligible.map((a)=>a.tier))].sort((a,b)=>a-b)) {
-        const pool=eligible.filter((a)=>a.tier===tier).map((a)=>({...a,weight:(a.weight ?? 1)*(factors[a.quotaFrom]?.factor ?? 1)})).filter((a)=>a.weight>0);
-        if(pool.length) {this.s.status='running';const selected=pool[pickWeighted(pool,1,`${this.run.id}-${this.s.usage.calls}`)[0]];claim?.(selected);return selected;}
+        const pool=eligible.filter((a)=>a.tier===tier).map((a)=>({...a,share:factors[a.quotaFrom]?.factor ?? 1})).filter((a)=>a.share>0);
+        if(pool.length) {this.s.status='running';const selected=pool[pickByShare(pool,1,`${this.run.id}-${this.s.usage.calls}`)[0]];claim?.(selected);return selected;}
       }
       this.s.status='awaiting_quota';this.s.phase='waiting for an available agent at the requested tier or higher';this.save();
       // No model calls while waiting; only read-only quota sources refresh.

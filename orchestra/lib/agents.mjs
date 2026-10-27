@@ -34,7 +34,7 @@ export function detectedAgents(root) {
     if (seen.has(name)) continue; seen.add(name);
     const a = loadAdapter(root,name);
     if (spawnSync('which', [a.command[0]==='{node}'?process.execPath:a.command[0]], {stdio:'ignore'}).status === 0) {
-      for (const [id,entry] of Object.entries(a.suggestions ?? {[name]:{tier:2,weight:1}})) agents[id] = {cli:name,...entry};
+      for (const [id,entry] of Object.entries(a.suggestions ?? {[name]:{tier:2}})) agents[id] = {cli:name,...entry};
     }
   }
   return agents;
@@ -57,9 +57,9 @@ export function seededRandom(seed) {
   for (const c of seed) n = Math.imul(n ^ c.charCodeAt(0),16777619);
   return () => { n = Math.imul(1664525,n)+1013904223 | 0; return (n>>>0)/4294967296; };
 }
-export function pickWeighted(agents,count,seed) {
-  const random = seededRandom(seed), total = agents.reduce((s,a) => s+(a.weight ?? 1),0);
-  return Array.from({length:count}, () => { let r=random()*total; return agents.findIndex((a) => (r-=a.weight ?? 1)<0); });
+export function pickByShare(agents,count,seed) {
+  const random = seededRandom(seed), total = agents.reduce((s,a) => s+a.share,0);
+  return Array.from({length:count}, () => { let r=random()*total; return agents.findIndex((a) => (r-=a.share)<0); });
 }
 export function adapterHelper(a, command, request) {
   if (!command) return null;

@@ -86,8 +86,7 @@
   "suggestions": {
     "flash": {
       "model": "gemini-3.8-flash-high",
-      "tier": 1,
-      "weight": 2
+      "tier": 1
     }
   }
 }

@@ -10,8 +10,8 @@ The five promises in [CONSTITUTION.md](CONSTITUTION.md):
 
 - **Cheap models do the bulk of the work.** Strong models write briefs, plans and syntheses
   and diagnose failures. They don't do the typing.
-- **Every subscription drains at an even pace.** Work is weighted by each account's 5-hour
-  and weekly windows, so nothing runs dry early.
+- **Every subscription drains at an even pace.** Each account's share of the work follows its
+  pace in its 5-hour and weekly windows, so nothing runs dry early.
 - **Work runs in parallel** across agents and vendors. Code enforces each step's guarantees.
 - **Nothing spends tokens while waiting.** The tool is idle until something needs you.
 - **Any CLI, and you stay the only author.** Orchestra is vendor independent and commits
@@ -223,7 +223,7 @@ An entry describes a model at an effort level; the same CLI can have several ent
 ```json
 {
   "agents": {
-    "fast": {"cli":"my-tool","model":"small","tier":1,"weight":2},
+    "fast": {"cli":"my-tool","model":"small","tier":1},
     "strong": {"cli":"my-tool","model":"large","effort":"high","tier":3}
   },
   "escalate": {"afterFailures":1}
@@ -271,16 +271,19 @@ them all. Set it to `false` to start every run from your checkout.
 
 Subscriptions have usage windows, such as a **5-hour window** and a **weekly window**.
 Where the adapter supplies them, Orchestra compares how much you used with how much time
-has passed. An account using its quota slowly gets more weight; one using it quickly gets less.
-The tightest observed window controls the weight. This helps spread work across your accounts.
+has passed. Its pace is time passed minus quota used; its factor is `1 + strength × pace`,
+kept between 0.2 and 3 (`quotaBalancing.strength`, default 2). The tightest observed window
+sets the factor. Each entry in the requested tier gets a share of the work in proportion to
+its factor: an account using its quota slowly gets more, one using it quickly gets less, and
+every eligible entry keeps some share.
 
-- Choose within the requested tier using each entry's weight and observed quota pace.
+- Choose within the requested tier by each entry's share.
 - Skip an account near its limit: by default, at **95%** used in any current observed window.
   A reported active limit also excludes it. `quotaBalancing.stopAtPercent` sets the threshold.
 - If that tier has no eligible quota, go **up a tier, never down**.
 - If no eligible entry at or above the requested tier is available, wait and report why.
   Waiting makes no model calls; read-only quota readers may refresh observations.
-- Unknown quota stays unknown. It adds no quota adjustment to the configured weight.
+- Unknown quota stays unknown. That entry gets factor 1.
   An adapter may read quota from a local source or observe it passively after a call.
 
 `orchestra quota` shows observations; `--no-refresh` shows the saved ones.

@@ -23,8 +23,8 @@ Five promises define Orchestra. Every change must keep all five.
 
 1. **Cheap models do the bulk of the work.** Strong models write briefs, plans and syntheses
    and diagnose failures. They don't do the typing.
-2. **Every subscription drains at an even pace.** Work is weighted by each account's 5-hour and
-   weekly windows, so nothing runs dry early.
+2. **Every subscription drains at an even pace.** Each account's share of the work follows its pace in
+   its 5-hour and weekly windows, so nothing runs dry early.
 3. **Work runs in parallel** across agents and vendors, with each step's guarantees enforced
    by code, not left to an agent's goodwill.
 4. **Nothing spends tokens while waiting.** The tool is idle until something needs you.
@@ -76,4 +76,4 @@ breaking any promise.
 Procedures belong in workflow files; reusable guarantees belong in the six blocks.
 Amend this constitution explicitly before changing the product's direction.
 
-**Version**: 2.2.0 | **Ratified**: 2026-10-20 | **Last amended**: 2026-10-26
+**Version**: 2.2.1 | **Ratified**: 2026-10-20 | **Last amended**: 2026-10-27
