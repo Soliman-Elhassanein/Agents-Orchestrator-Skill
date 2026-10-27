@@ -26,6 +26,7 @@ if(role==='brief') {
   const tasks=/\n(\[\{"id":.*\])\nRequest:/.exec(brief);
   const make=(task)=>`Prepared brief: change the requested files; implement the steps; done when the relevant check passes.\nSUBTASK:\n${task}`;
   output=tasks?{briefs:Object.fromEntries(JSON.parse(tasks[1]).map((t)=>[t.id,make(t.id+' '+t.text)]))}:{text:make(title)};
+  if(tasks && env.MOCK_BRIEF_MISSING && !brief.includes('Previous attempt'))output={lessons:[]};
 }
 if(role==='diagnosis')output={text:`Revised brief.\nSUBTASK:\n${title}\nPrevious attempt failed; fix npm test and repeat the relevant check.`};
 if(role==='synthesis')output={text:'Agreement and disagreement with reasons; options and open questions.',agreement:['shared points'],disagreement:[],options:[],openQuestions:[]};

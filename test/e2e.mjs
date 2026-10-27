@@ -353,6 +353,13 @@ const tests={
     const fenced='Briefs:\n```json\n{"briefs":{"T001":"Add:\\n```python\\nprint(1)\\n```\\nDone."}}\n```\n```json\n{"lessons":[]}\n```';
     assert.deepEqual(extractJson(fenced),{briefs:{T001:'Add:\n```python\nprint(1)\n```\nDone.'},lessons:[]});
   },
+  'step 5: phase briefs missing tasks are retried, not recorded as done'() {
+    const dir=project();codeWorkflow(dir);taskFile(dir,'## Phase 1: Work\n- [ ] T001 [P] Write one\n- [ ] T002 [P] Write two\n');
+    orch(dir,['run','code','--task-file','tasks.md','--foreground'],{MOCK_BRIEF_MISSING:'1'});const s=state(dir),r=report(dir);
+    assert.equal(s.status,'completed',s.error);
+    const briefs=r.calls.filter((c)=>c.step.endsWith('/phase-1/brief'));
+    assert.deepEqual(briefs.map((c)=>c.status),['failed','completed']);
+  },
   'step 5: generated task list uses a tier-3 call then cheap lanes'() {
     const dir=project();codeWorkflow(dir);orch(dir,['run','code','make two changes','--foreground']);const s=state(dir),r=report(dir);
     assert.equal(s.status,'completed',s.error);assert.deepEqual(r.calls.map((c)=>c.entry),['strong','strong','small','small']);
