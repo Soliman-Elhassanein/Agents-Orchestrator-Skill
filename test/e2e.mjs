@@ -350,6 +350,8 @@ const tests={
     assert.deepEqual(extractJson('```json\n{"outcome":"converged"}\n```\n```json\n{"lessons":[{"text":"a"}]}\n```'),{outcome:'converged',lessons:[{text:'a'}]});
     assert.deepEqual(extractJson('Done. {"outcome":"x","summary":"a } and \\" inside"}\n{"lessons":[1]}\n{"lessons":[2]}'),{outcome:'x',summary:'a } and " inside',lessons:[1,2]});
     assert.equal(extractJson('no json {here}'),null);
+    const fenced='Briefs:\n```json\n{"briefs":{"T001":"Add:\\n```python\\nprint(1)\\n```\\nDone."}}\n```\n```json\n{"lessons":[]}\n```';
+    assert.deepEqual(extractJson(fenced),{briefs:{T001:'Add:\n```python\nprint(1)\n```\nDone.'},lessons:[]});
   },
   'step 5: generated task list uses a tier-3 call then cheap lanes'() {
     const dir=project();codeWorkflow(dir);orch(dir,['run','code','make two changes','--foreground']);const s=state(dir),r=report(dir);

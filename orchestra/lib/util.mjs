@@ -25,12 +25,11 @@ export function projectMessage(root, message) {
  * Every JSON object in a model reply, last first: fenced ```json blocks, plus a bare object if the
  * reply has no usable fence. One parser for plans, questions and reports alike.
  */
-// Every top-level JSON object in a reply, in order: fenced blocks first, else bare objects.
+// Every top-level JSON object in a reply, in order, fenced or not. Scanning braces with string
+// awareness keeps objects whole even when their strings contain Markdown code fences.
 export function jsonObjects(text) {
   if (!text) return [];
   const parse = (s) => { try { const v = JSON.parse(s); return v && typeof v === "object" && !Array.isArray(v) ? [v] : []; } catch { return []; } };
-  const fenced = [...text.matchAll(/```(?:json)?\s*([\s\S]*?)```/g)].flatMap((m) => parse(m[1]));
-  if (fenced.length) return fenced;
   const out = [];
   for (let i = text.indexOf("{"); i !== -1; i = text.indexOf("{", i + 1)) {
     let depth = 0, quoted = false;

@@ -22,7 +22,8 @@ Changes:
   tasks that agents appended during the phase.
 - A reply with several JSON objects, such as a result followed by a separate `lessons`
   block, is read as one output: later objects win and `lessons` and `suggestions` lists are
-  combined. Only the last fenced block was read before, so a correct result could be rejected.
+  combined. Only the last fenced block was read before, so a correct result could be rejected. Objects are found by
+  scanning braces, so Markdown code fences inside their strings no longer cut them short.
 - `orchestra doctor` prints `ok <agent>: <cli> on PATH`, and the install fix only for a
   missing CLI, instead of an install instruction on every passing line.
 - `operatorUpdateMinutes` replaces `communicatorUpdateMinutes`; the old key still works.
