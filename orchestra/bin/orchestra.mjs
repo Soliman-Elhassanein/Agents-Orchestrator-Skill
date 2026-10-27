@@ -21,7 +21,7 @@ import { listWorkflows, loadWorkflow, workflowFile, builtinWorkflows, checkWorkf
 import { workflowOutline, writeWorkflowDiagram } from "../tools/diagram.mjs";
 import { runLoop } from "../lib/runner.mjs";
 import { childEnv } from "../lib/util.mjs";
-import { RunState, latestRunId, listRuns, newRunId, oneLine } from "../lib/state.mjs";
+import { RunState, latestRunId, listRuns, newRunId, oneLine, runExists } from "../lib/state.mjs";
 import { addLessons, approveLesson, loadKnowledge, removeLesson, renderKnowledge } from "../lib/knowledge.mjs";
 import { loadQuota, quotaWarnings, refreshQuota, renderQuota } from "../lib/quota.mjs";
 
@@ -61,7 +61,7 @@ function pidAlive(pid) {
 function resolveRun(root, id) {
   const runId = id ?? latestRunId(root);
   if (!runId) die("no runs yet");
-  if (!existsSync(join(root, ".orchestra", "runs", runId, "state.json"))) die(`no run "${runId}"`);
+  if (!runExists(root, runId)) die(`no run "${runId}"`);
   const run = RunState.load(root, runId);
   if (["running", "awaiting_user", "awaiting_quota", "queued"].includes(run.data.status) && run.data.pid && !pidAlive(run.data.pid)) {
     run.data = { ...run.data, status: "crashed", crashedWhile: run.data.status, error: run.data.error ?? "the worker process is gone — see .orchestra/worker.log" };
@@ -340,7 +340,7 @@ function cmdQueue(args) {
 /** Run id from the first bare argument if it names a run, else the latest run. */
 function splitRunArg(root, args) {
   const first = args.find((a) => !a.startsWith("--"));
-  if (first && existsSync(join(root, ".orchestra", "runs", first, "state.json"))) {
+  if (first && runExists(root, first)) {
     return { run: resolveRun(root, first), rest: args.filter((a) => a !== first) };
   }
   return { run: resolveRun(root), rest: args };
@@ -420,7 +420,7 @@ function healthReport(root) {
   const workerAlive = pidAlive(readPid(root));
   for (const item of q.items.filter((i) => i.status === "running")) {
     if (!workerAlive) {
-      const s = item.runId && existsSync(join(root, ".orchestra", "runs", item.runId, "state.json")) ? resolveRun(root, item.runId).data : null;
+      const s = item.runId && runExists(root, item.runId) ? resolveRun(root, item.runId).data : null;
       let tail = "";
       try { tail = readFileSync(join(root, ".orchestra", "worker.log"), "utf8").trim().split("\n").slice(-12).join("\n"); } catch { /* none */ }
       alerts.push({
@@ -526,7 +526,7 @@ async function cmdWatch(args, runId = null) {
   const snapshot = () => {
     const q = queue.loadQueue(root);
     const latest = runId ?? latestRunId(root);
-    const s = latest && existsSync(join(root,'.orchestra','runs',latest,'state.json')) ? resolveRun(root, latest).data : null;
+    const s = latest && runExists(root, latest) ? resolveRun(root, latest).data : null;
     return { q, s, workerAlive: pidAlive(readPid(root)), pending: q.items.filter((i) => i.status === "pending").length };
   };
   const emit = (kind, text) => {

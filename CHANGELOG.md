@@ -20,6 +20,12 @@ Changes:
 - Ticking a phase edits only that phase's checkboxes in the current task file on the run
   branch. It used to rewrite the file from the copy read at the start of the step, deleting
   tasks that agents appended during the phase.
+- Commands that read a run wait up to two seconds for `state.json` instead of reporting `no
+  run`. Some filesystems, such as NTFS through FUSE or network drives, replace the file by
+  rename in two steps, so `watch` could stop on a live run.
+- Resuming a failed run gives its failed steps a fresh retry budget at their tier, so a run
+  whose cause you fixed retries instead of failing again at once. Resume also clears the old
+  failure summary and step marks that `status` kept printing.
 - An engine call whose output fails Orchestra's own check, such as phase briefs that miss a
   task, is a failed attempt and is retried with the reason. It used to be recorded as
   completed, so the run failed and `resume` replayed the same bad output; resume now

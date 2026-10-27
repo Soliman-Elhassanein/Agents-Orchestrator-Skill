@@ -441,7 +441,11 @@ class Runtime {
       for(const dir of [this.wtRoot,g.legacyWorktreesRoot(this.root,this.run.id)])if(existsSync(dir))for(const d of readdirSync(dir))g.removeWorktree(this.root,join(dir,d));
       if(resume) {
         for(const call of [...this.s.calls,...Object.values(this.s.steps).flatMap((e)=>e.attempts ?? []),...this.s.gates])if(call.status==='running')call.status='interrupted';
-        g.addExistingBranchWorktree(this.root,this.wt,this.s.branch);this.s.finishedAt=undefined;this.s.error=undefined;}
+        g.addExistingBranchWorktree(this.root,this.wt,this.s.branch);this.s.finishedAt=undefined;this.s.error=undefined;this.s.final=undefined;
+        // Resuming a failed run means its cause was fixed: the failed steps get a fresh retry
+        // budget at their tier. A crashed or stopped run keeps its count.
+        const exhausted=this.s.status==='failed';
+        for(const e of Object.values(this.s.steps))if(e.status==='failed'){e.status='pending';if(exhausted)e.failures=0;}}
       else g.addBranchWorktree(this.root,this.wt,this.s.branch,this.s.base);
       this.s.pid=process.pid;this.s.status='running';this.save();
       await refreshQuota(this.root,this.agents);

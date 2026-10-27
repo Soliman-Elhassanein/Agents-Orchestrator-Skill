@@ -6,7 +6,7 @@
 import { workflowDiagram } from "../orchestra/tools/diagram.mjs";
 import assert from "node:assert/strict";
 import { spawn, spawnSync as nativeSpawnSync } from "node:child_process";
-import { chmodSync, closeSync, cpSync, existsSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, closeSync, cpSync, existsSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -305,6 +305,13 @@ const tests={
     assert.ok(briefs.every((b)=>b.includes('"research"') && !b.includes('"views"')));
     assert.equal(r.gates[0].exit,0);assert.equal(r.gates[0].revision,r.baseCommit);
   },
+  'step 4: a resumed failed run drops its old failure summary and failed step marks'() {
+    const dir=project({executorRetries:0});workflow(dir,'sample',[{id:'only',agent:{prompt:'read.md',tier:1}}]);
+    orchRaw(dir,['run','sample','fail first','--foreground'],{MOCK_FAIL:'all'});assert.equal(state(dir).status,'failed');
+    orch(dir,['resume']);waitFor(()=>state(dir).status==='completed','resume after failure');
+    const s=state(dir);assert.match(s.final,/Execution completed/);assert.ok(!Object.values(s.steps).some((e)=>e.status==='failed'));
+    assert.doesNotMatch(orch(dir,['status']),/failed/);
+  },
   'step 4: ask waits with zero calls, requires numbered answers and resumes from its checkpoint'() {
     const dir=project();workflow(dir,'sample',[{id:'before',agent:{prompt:'read.md',tier:1}},{id:'choice',ask:{questions:['Which database?','Which name?']}},{id:'after',agent:{prompt:'read.md',tier:1}}]);
     orch(dir,['run','sample','ask me','--detach']);waitFor(()=>state(dir).status==='awaiting_user','question');
@@ -352,6 +359,13 @@ const tests={
     assert.equal(extractJson('no json {here}'),null);
     const fenced='Briefs:\n```json\n{"briefs":{"T001":"Add:\\n```python\\nprint(1)\\n```\\nDone."}}\n```\n```json\n{"lessons":[]}\n```';
     assert.deepEqual(extractJson(fenced),{briefs:{T001:'Add:\n```python\nprint(1)\n```\nDone.'},lessons:[]});
+  },
+  async 'step 5: readers wait out a state file that is briefly missing during a rename'() {
+    const dir=project();orch(dir,['run','solo','check something','--foreground']);const id=state(dir).id;
+    const file=join(dir,'.orchestra/runs',id,'state.json');renameSync(file,file+'.tmp');
+    const reading=orchAsync(dir,['status',id]);setTimeout(()=>renameSync(file+'.tmp',file),400);
+    const result=await reading;assert.equal(result.code,0,result.err);assert.match(result.out,new RegExp(`# Run ${id}`));
+    assert.equal(orchRaw(dir,['status','20000101-000000-none']).code,1,'a run that never existed still fails at once');
   },
   'step 5: phase briefs missing tasks are retried, not recorded as done'() {
     const dir=project();codeWorkflow(dir);taskFile(dir,'## Phase 1: Work\n- [ ] T001 [P] Write one\n- [ ] T002 [P] Write two\n');
