@@ -113,8 +113,8 @@ class Runtime {
   topTier() {return Math.max(...this.agents.map((a)=>a.tier));}
   // Work branches sit next to the run branch: orchestra/<run>.<step>.<part>, e.g. orchestra/<run>.execute.T001-add-login-form.
   branchFor(key,part) {return `${this.s.branch}.${key.split('/').join('.')}.${part}`;}
-  async strong(purpose,key,wt,input) {
-    const e=await this.isolated({access:'read',tier:this.topTier(),purpose,role:purpose,
+  async strong(purpose,key,wt,input,check) {
+    const e=await this.isolated({access:'read',tier:this.topTier(),purpose,role:purpose,check,
       engineText:readFileSync(join(engineDir,`templates/${purpose}.md`),'utf8')+'\n\n'+input},key,g.headSha(wt));
     return e.output;
   }
@@ -144,7 +144,8 @@ class Runtime {
   }
   async job(b,key,wt,extra='',fixed,reservations) {
     const e=this.s.steps[key] ??= {status:'running'}; e.attempts ??=[];e.failures ??=0;
-    if(e.status==='completed')return e;
+    if(e.status==='completed' && !b.check?.(e.output ?? {}))return e;
+    if(e.status==='completed'){e.status='running';delete e.output;}
     e.tier ??= b.tier ?? (b.agent ? this.agents.find((a)=>a.name===b.agent)?.tier ?? 2 : 2);e.tierFailures ??=0;
     if(extra)e.extra=extra;extra=e.extra ?? extra;
     if(e.pendingFailure)await this.prepareRetry(b,key,wt,e);
@@ -187,6 +188,8 @@ class Runtime {
       if(res.status==='completed' && b.choices && !output.questions?.length && !b.choices.values.includes(get(output,b.choices.field))) {
         res.status='failed';res.error=`output field ${b.choices.field} must be one of ${b.choices.values.join(', ')}`;
       }
+      // An engine call whose output fails its check is a failed attempt, so resume asks again.
+      if(res.status==='completed' && b.check && !output.questions?.length) {const why=b.check(output);if(why){res.status='failed';res.error=why;}}
       if(res.status==='completed' && output.questions?.length) {
         if(b.access==='write') {g.commitAll(wt,`orchestra: ${key} before user question`);this.recordWrite(wt,base,e,call,res.outDir);}
         await this.ask(key,output.questions);continue;
@@ -305,9 +308,10 @@ class Runtime {
       }
       entry.briefs ??={};
       if(!entry.briefs[phase] && (await this.choose({...b,tier:b.tier ?? 1})).tier<this.topTier()) {
+        const missing=(output)=>todo.filter((t)=>!(typeof output.briefs?.[t.id]==='string' && output.briefs[t.id].trim())).map((t)=>t.id);
         const output=await this.strong('brief',`${key}/phase-${phase}/brief`,this.wt,
-          `Return {"briefs":{"TASK_ID":"brief text"}} for every task in this phase.\n${JSON.stringify(todo)}\nRequest: ${this.s.task}`);
-        if(!todo.every((t)=>typeof output.briefs?.[t.id]==='string' && output.briefs[t.id].trim()))throw new Error('phase briefs missing task IDs or text');
+          `Return {"briefs":{"TASK_ID":"brief text"}} for every task in this phase.\n${JSON.stringify(todo)}\nRequest: ${this.s.task}`,
+          (o)=>missing(o).length?`phase briefs missing task IDs or text: ${missing(o).join(', ')}`:null);
         entry.briefs[phase]=output.briefs;this.save();
       }
       for(const group of groups) {
