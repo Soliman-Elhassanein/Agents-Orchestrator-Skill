@@ -5,7 +5,7 @@ import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { prepareBrief } from './context.mjs';
-import { childEnv, jsonObjects } from './util.mjs';
+import { childEnv, jsonObjects, mergeJson } from './util.mjs';
 export const engineDir = dirname(dirname(fileURLToPath(import.meta.url)));
 const validName = (s) => /^[a-zA-Z0-9_-]+$/.test(s);
 export const adapterDirs = (root) => [join(root, '.orchestra/adapters'), join(homedir(), '.config/orchestra/adapters'), join(engineDir, 'adapters')];
@@ -50,7 +50,7 @@ export function stopAllAgents() {
   }
 }
 export const describeAgent = (a) => [a.name ?? a.cli, a.model, a.effort].filter(Boolean).join(' / ');
-export const extractJson = (s) => jsonObjects(s)[0] ?? null;
+export const extractJson = (s) => mergeJson(jsonObjects(s));
 export const setupProblem = (_a,r) => r.startup ?? null;
 export function seededRandom(seed) {
   let n = 2166136261;

@@ -363,7 +363,9 @@ class Runtime {
         }
       }
       this.s.phaseGateRevision=g.headSha(this.wt);
-      const lines=entry.text.split('\n');for(const t of todo){lines[t.lineIndex]=lines[t.lineIndex].replace('- [ ]','- [x]');this.s.tasks.find((r)=>r.id===t.id).status='executed';}
+      // Tick in the current file: tasks may have appended work to it during the phase.
+      const lines=(existsSync(entry.tickPath)?readFileSync(entry.tickPath,'utf8'):entry.text).split('\n');
+      for(const t of todo){const i=lines.findIndex((l)=>l.startsWith(`- [ ] ${t.id} `));if(i>=0)lines[i]=lines[i].replace('- [ ]','- [x]');this.s.tasks.find((r)=>r.id===t.id).status='executed';}
       entry.text=lines.join('\n');mkdirSync(resolve(entry.tickPath,'..'),{recursive:true});writeFileSync(entry.tickPath,entry.text);
       if(entry.tickPath.startsWith(this.wt+'/'))g.commitAll(this.wt,`orchestra: tick phase ${phase}`);
       entry.phases.push(phase);this.s.phaseGateRevision=g.headSha(this.wt);this.save();

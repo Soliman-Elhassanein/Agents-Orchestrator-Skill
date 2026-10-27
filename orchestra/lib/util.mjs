@@ -25,24 +25,28 @@ export function projectMessage(root, message) {
  * Every JSON object in a model reply, last first: fenced ```json blocks, plus a bare object if the
  * reply has no usable fence. One parser for plans, questions and reports alike.
  */
+// Every top-level JSON object in a reply, in order: fenced blocks first, else bare objects.
 export function jsonObjects(text) {
   if (!text) return [];
+  const parse = (s) => { try { const v = JSON.parse(s); return v && typeof v === "object" && !Array.isArray(v) ? [v] : []; } catch { return []; } };
+  const fenced = [...text.matchAll(/```(?:json)?\s*([\s\S]*?)```/g)].flatMap((m) => parse(m[1]));
+  if (fenced.length) return fenced;
   const out = [];
-  for (const m of [...text.matchAll(/```(?:json)?\s*([\s\S]*?)```/g)].reverse()) {
-    try {
-      const v = JSON.parse(m[1]);
-      if (v && typeof v === "object" && !Array.isArray(v)) out.push(v);
-    } catch { /* not JSON */ }
-  }
-  if (!out.length) {
-    const start = text.indexOf("{");
-    const end = text.lastIndexOf("}");
-    if (start !== -1 && end > start) {
-      try {
-        const v = JSON.parse(text.slice(start, end + 1));
-        if (v && typeof v === "object" && !Array.isArray(v)) out.push(v);
-      } catch { /* not JSON */ }
+  for (let i = text.indexOf("{"); i !== -1; i = text.indexOf("{", i + 1)) {
+    let depth = 0, quoted = false;
+    for (let j = i; j < text.length; j++) {
+      const c = text[j];
+      if (quoted) { if (c === "\\") j++; else if (c === '"') quoted = false; continue; }
+      if (c === '"') quoted = true; else if (c === "{") depth++;
+      else if (c === "}" && --depth === 0) { const v = parse(text.slice(i, j + 1)); if (v.length) { out.push(...v); i = j; } break; }
     }
   }
   return out;
+}
+// One reply object: later objects win, and lessons and suggestions lists are combined.
+export function mergeJson(objects) {
+  const out = {};
+  for (const o of objects) for (const [k, v] of Object.entries(o))
+    out[k] = ["lessons", "suggestions"].includes(k) && Array.isArray(out[k]) && Array.isArray(v) ? [...out[k], ...v] : v;
+  return objects.length ? out : null;
 }
