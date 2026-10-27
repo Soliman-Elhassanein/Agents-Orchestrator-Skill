@@ -13,5 +13,5 @@
   <mxCell id="n10" value="ask" style="rounded=1;whiteSpace=wrap;html=0;fillColor=#fff2cc;strokeColor=#666666;fontSize=12;" vertex="1" parent="1" data-kind="ask" data-role="legend"><mxGeometry x="220" y="495" width="95" height="35" as="geometry"/></mxCell>
   <mxCell id="n11" value="gate" style="rounded=1;whiteSpace=wrap;html=0;fillColor=#d5e8d4;strokeColor=#666666;fontSize=12;" vertex="1" parent="1" data-kind="gate" data-role="legend"><mxGeometry x="320" y="495" width="95" height="35" as="geometry"/></mxCell>
   <mxCell id="n12" value="loop" style="rounded=1;whiteSpace=wrap;html=0;fillColor=#ffe6cc;strokeColor=#666666;fontSize=12;" vertex="1" parent="1" data-kind="loop" data-role="legend"><mxGeometry x="420" y="495" width="95" height="35" as="geometry"/></mxCell>
-  <mxCell id="n13" value="tasks" style="rounded=1;whiteSpace=wrap;html=0;fillColor=#f8cecc;strokeColor=#666666;fontSize=12;" vertex="1" parent="1" data-kind="tasks" data-role="legend"><mxGeometry x="520" y="495" width="95" height="35" as="geometry"/></mxCell>
+  <mxCell id="n13" value="checklist" style="rounded=1;whiteSpace=wrap;html=0;fillColor=#f8cecc;strokeColor=#666666;fontSize=12;" vertex="1" parent="1" data-kind="checklist" data-role="legend"><mxGeometry x="520" y="495" width="95" height="35" as="geometry"/></mxCell>
 </root></mxGraphModel></diagram></mxfile>

@@ -295,7 +295,7 @@ never reaches a limit.
 Every run names a workflow: `orchestra run <workflow> "task"`. Without one, `run` stops and
 points to `orchestra workflow list`.
 
-The `tasks` block runs a task list. The engine reads an explicit task file or
+The `checklist` block runs a checklist file of tasks. The engine reads an explicit file or
 asks a highest-tier agent to write one. It prepares briefs for cheap workers, runs the tasks
 on their own branches, merges them and runs phase gates. Only executed tasks whose gates
 passed are ticked. Generated lists stay in the run folder. Project task files are ticked
@@ -314,7 +314,7 @@ A `[P]` marker promises different files and no shared state. Orchestra trusts th
 Existing ticks are skipped. `fanout.executors` limits how many tasks run at once.
 
 Workflows are versioned JSON with six blocks: `agent`, `parallel`, `ask`, `gate`, `loop` and
-`tasks`. Orchestra compiles each one into a LangGraph state graph: steps are nodes, their
+`checklist`. Orchestra compiles each one into a LangGraph state graph: steps are nodes, their
 order is the edges. An `agent` step can return one of a fixed list of values (`choices`) and
 later steps run only `when` it chose theirs, so a run can branch but only along paths the
 workflow names. Project workflows override user workflows, which override built-ins. Each

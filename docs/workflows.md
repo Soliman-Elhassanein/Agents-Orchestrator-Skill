@@ -24,11 +24,12 @@ what the workflow does, what to give it, with one example `orchestra run` comman
 it returns. `orchestra workflow list` prints every workflow found in the search order with
 its source and description; `--json` gives the same as data.
 
-Version 3 adds routing (`when` and `choices`, below) and names the task-list block `tasks`.
-Version 2 is the same without routing, and its task-list block is called `lanes`. Version 1
+Version 3 adds routing (`when` and `choices`, below) and names the checklist block `checklist`
+(early v3 packs call it `tasks`, which still works). Version 2 is the same without routing, and
+its checklist block is called `lanes`. Version 1
 is version 2 without `description`; `workflow list` shows such packs as having no
 description. Orchestra still runs v1 and v2 packs. To upgrade one, add `description`, rename
-any `lanes` block to `tasks` and set `"workflow": 3`.
+any `lanes` block to `checklist` and set `"workflow": 3`.
 
 A pack may also include a `README.md` guide that walks through a full run: an example
 session, what each step asks and the files it leaves. `workflow list` prints its path.
@@ -144,11 +145,11 @@ installed copy; it rejects stale supplied diagrams. Source packs are left untouc
   after each iteration; never interprets prose. The maximum is a hard bound; if the field
   never matches, the block stops with `exhausted` and dependent work does not start.
 - `agent` in v3 also takes `choices:{field, values}`; see [Routing](#routing).
-- `tasks` (`lanes` in v1 and v2): optional `taskFile` (explicit path, or `{{taskFile}}`),
+- `checklist` (`lanes` in v1 and v2, `tasks` in early v3): optional `taskFile` (explicit path, or `{{taskFile}}`),
   `tier` (default 1), `access:"write"`.
   Without a task file from the block or run options, the engine makes a highest-tier,
   read-only plan call and saves its task-list text inside the run folder. This works with
-  `{"tasks":{}}`, without any planning step.
+  `{"checklist":{}}`, without any planning step.
   Before each phase with workers below the highest tier, one engine brief call returns all
   task briefs as `{"briefs":{"T001":"..."}}`. Each brief specifies changes, files, steps and
   the check that proves the change. Workers receive their own briefs.
@@ -173,7 +174,7 @@ why. Unknown quota stays unknown and keeps factor 1. Nothing falls back to a low
 
 ## Task lists and records
 
-Give the path explicitly to a workflow with a `tasks` block:
+Give the path explicitly to a workflow with a `checklist` block:
 `orchestra run <workflow> --task-file tasks.md --foreground`.
 Omit `--foreground` to start the worker and watch in the calling process until an attention
 event or periodic check-in; use `--detach` to return immediately with the run ID.
@@ -275,7 +276,7 @@ dispatcher step with `choices` at the start is enough; don't let routing happen 
 | Concurrent | Independent views or specializations on the same input; ensemble or vote | `parallel` with `distinct:"vendor"`; the engine's synthesis resolves conflicts |
 | Maker-checker | A result must meet stated criteria before going on | A `loop`: maker step, then a `gate` or a checker `agent` with `choices` (pass or revise) as its stop field; set `max` and say what happens when it runs out |
 | Handoff | The right specialist emerges during the work | An `agent` with `choices` routing to specialist steps with `when` |
-| Plan, then execute | Open-ended work needing a plan a person can review | A strong `agent` writes a task list, an `ask` for approval, then a `tasks` block |
+| Plan, then execute | Open-ended work needing a plan a person can review | A strong `agent` writes a task list, an `ask` for approval, then a `checklist` block |
 | Group discussion | Debate or critique rounds | `parallel` with `sees` of the previous round and `anonymize`, in a bounded `loop`; keep it to three agents or fewer |
 
 Different stages can use different patterns; don't force one workflow into a single pattern.
@@ -332,7 +333,7 @@ engine and original checkout for trusted gate scripts.
 Dry mode uses in-process mock outputs, automatic mock user answers and mock successful gates.
 It prints each block and parallel child, traverses every bounded loop iteration, and counts
 calls against the budget, including syntheses and conservative brief estimates for write
-calls (real highest-tier workers skip separate briefs). A `tasks` block uses one synthetic
+calls (real highest-tier workers skip separate briefs). A `checklist` block uses one synthetic
 phase and task, with a plan call when no taskFile field is supplied. A step with `choices`
 takes its first listed value, so dry mode follows one route and shows the other routed steps
 as skipped. Real task-file availability,

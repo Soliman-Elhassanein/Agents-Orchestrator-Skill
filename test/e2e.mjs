@@ -104,7 +104,7 @@ function workflow(dir,name,steps,budget=16,prompts={},version=1) {
   return path;
 }
 // A task-list workflow and a read-only single agent, as project fixtures.
-const codeWorkflow=(dir)=>workflow(dir,'code',[{id:'execute',tasks:{taskFile:'{{taskFile}}',tier:1,access:'write'}}],128,{},3);
+const codeWorkflow=(dir)=>workflow(dir,'code',[{id:'execute',checklist:{taskFile:'{{taskFile}}',tier:1,access:'write'}}],128,{},3);
 const reader=(dir)=>workflow(dir,'reader',[{id:'task',agent:{prompt:'read.md',access:'read'}}],32);
 function taskFile(dir,text) {writeFileSync(join(dir,'tasks.md'),text);commit(dir);return join(dir,'tasks.md');}
 // Validate the XML subset emitted by the renderer, including graph IDs and references.
@@ -585,7 +585,7 @@ Object.assign(tests, {
       [{workflow:3,steps:[{id:'plain',agent:{prompt:'read.md'}},{...ask,when:when('fix','plain')}]},/earlier step's choices/],
       [{workflow:3,steps:[{id:'views',parallel:{prompt:'read.md',choices:decide.agent.choices}}]},/choices need workflow v3 and an agent step/],
       [{workflow:3,steps:[{id:'one',agent:{prompt:'read.md',choices:{field:'action',values:['only']}}}]},/two or more distinct/],
-      [{workflow:3,steps:[{id:'work',lanes:{tier:1}}]},/names the lanes block tasks/],
+      [{workflow:3,steps:[{id:'work',lanes:{tier:1}}]},/names the lanes block checklist/],
       [{workflow:3,steps:[{id:'__start__',ask:ask.ask}]},/unique id/],
       [{workflow:3,steps:[{id:'repeat',loop:{max:1,until:{step:'decide',field:'action',equals:'fix'},steps:[decide]}},{...ask,when:when()}]},/earlier step's choices/]];
     for(const [w,error] of cases){const result=check(w);assert.equal(result.code,1,JSON.stringify(w));assert.match(result.err,error);}
@@ -726,7 +726,7 @@ Object.assign(tests, {
   }
 });
 Object.assign(tests, {
-  'workflows: v2 and v3 require a description while v1 packs and the lanes name still load'() {
+  'workflows: v2 and v3 require a description while v1 packs and the old block names still load'() {
     const dir=project(),steps=[{id:'ask',ask:{questions:['Choose?']}}];
     const write=(name,w)=>{const f=join(dir,'.orchestra/workflows',name);mkdirSync(f,{recursive:true});writeFileSync(join(f,'workflow.json'),JSON.stringify(w));orch(dir,['workflow','diagram',name]);return join(f,'workflow.json');};
     assert.match(orch(dir,['workflow','check',write('old',{workflow:1,budget:{calls:1},steps})]),/valid/);
@@ -739,6 +739,8 @@ Object.assign(tests, {
     assert.match(orchRaw(dir,['workflow','check',v1]).err,/unknown workflow field/);
     assert.match(orch(dir,['workflow','check',write('routed',{workflow:3,description:'Asks. Give a topic. Returns a choice.',budget:{calls:1},steps})]),/valid/);
     assert.match(orch(dir,['workflow','check',write('legacy',{workflow:1,budget:{calls:1},steps:[{id:'work',lanes:{tier:1}}]})]),/valid/);
+    assert.match(orch(dir,['workflow','check',write('early-v3',{workflow:3,description:'Runs tasks. Give a list. Returns commits.',budget:{calls:9},steps:[{id:'work',tasks:{tier:1}}]})]),/valid/);
+    assert.match(orch(dir,['workflow','run','early-v3','--dry']),/work: checklist/);
     const none=join(dir,'v3-none.json');writeFileSync(none,JSON.stringify({workflow:3,budget:{calls:1},steps}));assert.match(orchRaw(dir,['workflow','check',none]).err,/v3 requires a description/);
     const v4=join(dir,'v4.json');writeFileSync(v4,JSON.stringify({workflow:4,description:'x',budget:{calls:1},steps}));
     assert.equal(orchRaw(dir,['workflow','check',v4]).code,1);

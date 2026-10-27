@@ -6,11 +6,12 @@ import { workflowDiagram, writeWorkflowDiagram } from '../tools/diagram.mjs';
 import { withLock } from './lock.mjs';
 import { engineDir } from './agents.mjs';
 export const builtinWorkflows=existsSync(join(engineDir,'workflows')) ? join(engineDir,'workflows') : join(dirname(engineDir),'workflows');
-export const blocks = ['agent','parallel','ask','gate','loop','tasks'];
-// v1 and v2 packs name the task-list block `lanes`; loading renames it.
+export const blocks = ['agent','parallel','ask','gate','loop','checklist'];
+// The checklist block was `lanes` in v1 and v2 packs and `tasks` in early v3 packs; loading renames both.
+export const checklistNames = ['checklist','tasks','lanes'];
 export function normalizeWorkflow(w) {
-  const step=({lanes,...s})=>{
-    if(lanes!==undefined)s.tasks=lanes;
+  const step=({lanes,tasks,...s})=>{
+    if(lanes!==undefined || tasks!==undefined)s.checklist=lanes ?? tasks;
     if(s.loop?.steps)s.loop={...s.loop,steps:s.loop.steps.map(step)};
     return s;
   };
@@ -46,12 +47,12 @@ export function loadWorkflow(root,name) {
   return { ...normalizeWorkflow(data), dir:dirname(file) };
 }
 export function validateWorkflow(w,dir) {
-  // v2 adds a required description; v3 adds routing and names the task-list block `tasks`.
+  // v2 adds a required description; v3 adds routing and names the checklist block `checklist` (or `tasks`).
   const fields=w?.workflow>=2?['workflow','description','budget','steps']:['workflow','budget','steps'];
   if(!w || Object.keys(w).some((k)=>!fields.includes(k)) || Object.keys(w.budget ?? {}).some((k)=>k!=='calls'))throw new Error('unknown workflow field; workflows contain data only');
   if(![1,2,3].includes(w.workflow) || !Number.isSafeInteger(w.budget?.calls) || w.budget.calls<1)throw new Error('workflow v1, v2 or v3 requires a positive calls budget');
   if(w.workflow>=2 && (typeof w.description!=='string' || !w.description.trim()))throw new Error(`workflow v${w.workflow} requires a description: what it does, what to give it and what it returns`);
-  const v3=w.workflow===3, known=v3?blocks:blocks.map((k)=>k==='tasks'?'lanes':k);
+  const v3=w.workflow===3, known=v3?[...blocks,'tasks']:blocks.map((k)=>k==='checklist'?'lanes':k);
   // visible: earlier steps here and before each enclosing loop, by id; only they can route.
   const walk=(steps,visible=new Map())=>{
     visible=new Map(visible);
@@ -59,11 +60,11 @@ export function validateWorkflow(w,dir) {
     const ids=new Set();
     for(const s of steps) {
       if(!s || typeof s!=='object')throw new Error('invalid step');
-      if(v3 && s.lanes!==undefined)throw new Error('workflow v3 names the lanes block tasks');
+      if(v3 && s.lanes!==undefined)throw new Error('workflow v3 names the lanes block checklist');
       const keys=known.filter((k)=>s[k]!==undefined);
       // Ids starting with "__" are reserved for the workflow graph's own nodes.
       if(keys.length!==1 || typeof s.id!=='string' || !/^[\w-]+$/.test(s.id) || s.id.startsWith('__') || ids.has(s.id))throw new Error('each step needs a unique id and one known block');
-      ids.add(s.id); const raw=keys[0], k=raw==='lanes'?'tasks':raw, b=s[raw];
+      ids.add(s.id); const raw=keys[0], k=checklistNames.includes(raw)?'checklist':raw, b=s[raw];
       if(Object.keys(s).some((p)=>p!=='id' && p!==raw && !(v3 && p==='when')) || !b || typeof b!=='object' || Array.isArray(b))throw new Error(`invalid step ${s.id}`);
       if(s.when!==undefined) {
         const w=s.when, source=visible.get(w?.step)?.agent?.choices;
@@ -86,8 +87,8 @@ export function validateWorkflow(w,dir) {
       if(k==='ask' && (b.questions!==undefined && (!Array.isArray(b.questions)||b.questions.some((q)=>typeof q!=='string' || !q.trim())) || !b.prompt && !b.questions?.length))throw new Error('ask questions required');
       if(k==='loop') {if(!Number.isSafeInteger(b.max)||b.max<1 || !b.until?.step || !b.until.field || !Object.hasOwn(b.until,'equals') || (b.until.equals!==null && typeof b.until.equals==='object'))throw new Error('loop needs max and structured until');walk(b.steps,visible);if(!b.steps.some((s)=>s.id===b.until.step))throw new Error('loop until must reference a child step');}
       if(b.sees!==undefined && b.sees!=='previous' && (!Array.isArray(b.sees) || b.sees.some((s)=>typeof s!=='string')))throw new Error('sees must name earlier steps');
-      if(k==='tasks' && b.access && b.access!=='write')throw new Error(`${raw} requires write access`);
-      const allowed={agent:['prompt','tier','agent','access','sees','unless','outputFile','choices'],parallel:['prompt','tier','agent','access','sees','count','distinct','anonymize'],ask:['prompt','questions'],gate:['command'],loop:['steps','max','until'],tasks:['taskFile','tier','access']}[k];
+      if(k==='checklist' && b.access && b.access!=='write')throw new Error(`${raw} requires write access`);
+      const allowed={agent:['prompt','tier','agent','access','sees','unless','outputFile','choices'],parallel:['prompt','tier','agent','access','sees','count','distinct','anonymize'],ask:['prompt','questions'],gate:['command'],loop:['steps','max','until'],checklist:['taskFile','tier','access']}[k];
       if(Object.keys(b).some((p)=>!allowed.includes(p)))throw new Error(`unknown ${raw} field`);
       visible.set(s.id,s);
     }
@@ -120,11 +121,11 @@ export function dryWorkflow(raw,emit=console.log) {
   const walk=(steps,prefix='')=>{for(const s of steps){
     const k=blocks.find((k)=>s[k]),b=s[k],key=prefix+s.id;
     if(!routed(s,outputs,field)){emit(`${key}: ${k} (skipped: runs when ${s.when.step}.${s.when.field} = ${JSON.stringify(s.when.equals)})`);continue;}
-    emit(`${key}: ${k}${k==='gate'?` (mock exit 0; not executed) ${b.command}`:k==='ask'?' (mock user answer)':k==='tasks'?' (mock task list; no project writes)':''}`);
+    emit(`${key}: ${k}${k==='gate'?` (mock exit 0; not executed) ${b.command}`:k==='ask'?' (mock user answer)':k==='checklist'?' (mock checklist; no project writes)':''}`);
     if(k==='loop'){for(let i=0;i<b.max;i++)walk(b.steps,`${key}/${i}/`);outputs[s.id]={[b.until.field]:b.until.equals};}
-    else if(['agent','parallel','tasks'].includes(k)){
+    else if(['agent','parallel','checklist'].includes(k)){
       const call=(label,tier,access)=>{if(++calls>w.budget.calls)throw new Error('agent call budget exhausted in dry run');emit(`  ${key}/${label}: mock agent; tier ${tier}; ${access}`);};
-      if(k==='tasks') {
+      if(k==='checklist') {
         emit('  engine: plan if no task file; one brief call per phase below highest tier');
         if(!b.taskFile)call('plan','highest','read');
         call('phase-brief','highest','read');call('task',b.tier ?? 1,'write');

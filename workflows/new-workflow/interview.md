@@ -24,7 +24,7 @@ Find out:
 
 Keep the design as small as the user's description. Never propose safeguards, scripts, limits
 or reserves the user did not ask for. Orchestra's defaults already answer failure questions:
-a failing gate stops the run (after repair retries in a `tasks` block), a failed step is diagnosed and retried, and the budget and loop
+a failing gate stops the run (after repair retries in a `checklist` block), a failed step is diagnosed and retried, and the budget and loop
 `max` stop the run. Assume them and do not ask unless the user's words contradict them. When
 a question offers options, recommend the simplest one.
 
