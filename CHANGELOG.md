@@ -17,6 +17,12 @@ Changes:
 - The adapter guide says that agy's `--sandbox` makes the terminal read-only even in its own
   workspace, so sandboxed agy write steps can't run tests or builds, and how to opt out per
   project.
+- Ticking a phase edits only that phase's checkboxes in the current task file on the run
+  branch. It used to rewrite the file from the copy read at the start of the step, deleting
+  tasks that agents appended during the phase.
+- A reply with several JSON objects, such as a result followed by a separate `lessons`
+  block, is read as one output: later objects win and `lessons` and `suggestions` lists are
+  combined. Only the last fenced block was read before, so a correct result could be rejected.
 - `orchestra doctor` prints `ok <agent>: <cli> on PATH`, and the install fix only for a
   missing CLI, instead of an install instruction on every passing line.
 - `operatorUpdateMinutes` replaces `communicatorUpdateMinutes`; the old key still works.

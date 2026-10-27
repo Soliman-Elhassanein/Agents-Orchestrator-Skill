@@ -338,6 +338,19 @@ const tests={
     assert.equal(r.gates.filter((g)=>g.phase===1).length,1);assert.equal(r.gates.filter((g)=>g.phase===2).length,1);
     for(const gate of r.gates){assert.equal(gate.exit,0);assert.ok(existsSync(join(dir,'.orchestra/runs',s.id,gate.log)));assert.ok(gate.revision);}
   },
+  'step 5: ticking keeps tasks appended during the phase'() {
+    const dir=project();codeWorkflow(dir);taskFile(dir,'## Phase 1: Work\n- [ ] T001 [P] Write one\n- [ ] T002 [P] Write two\n');
+    orch(dir,['run','code','--task-file','tasks.md','--foreground'],{MOCK_APPEND_TASK:'T002'});const s=state(dir);
+    assert.equal(s.status,'completed',s.error);
+    const tasks=sh(dir,'git',['show',`${s.branch}:tasks.md`]);
+    assert.match(tasks,/- \[x\] T001 /);assert.match(tasks,/- \[x\] T002 /);assert.match(tasks,/- \[ \] T099 Appended by a task/);
+  },
+  async 'step 5: replies with several JSON objects merge into one output'() {
+    const {extractJson}=await import(join(REPO,'orchestra/lib/agents.mjs'));
+    assert.deepEqual(extractJson('```json\n{"outcome":"converged"}\n```\n```json\n{"lessons":[{"text":"a"}]}\n```'),{outcome:'converged',lessons:[{text:'a'}]});
+    assert.deepEqual(extractJson('Done. {"outcome":"x","summary":"a } and \\" inside"}\n{"lessons":[1]}\n{"lessons":[2]}'),{outcome:'x',summary:'a } and " inside',lessons:[1,2]});
+    assert.equal(extractJson('no json {here}'),null);
+  },
   'step 5: generated task list uses a tier-3 call then cheap lanes'() {
     const dir=project();codeWorkflow(dir);orch(dir,['run','code','make two changes','--foreground']);const s=state(dir),r=report(dir);
     assert.equal(s.status,'completed',s.error);assert.deepEqual(r.calls.map((c)=>c.entry),['strong','strong','small','small']);

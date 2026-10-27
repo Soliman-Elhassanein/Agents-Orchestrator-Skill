@@ -53,6 +53,7 @@ if((write || env.MOCK_VIOLATE_READ) && !noop && !output.questions) {
   writeFileSync(join('mock-output',`${name}.txt`),`${model}\n${title}\n`);
   if(env.MOCK_GATE_REPAIR && brief.includes('Revised brief'))writeFileSync('repaired.txt','fixed\n');
   if(env.MOCK_CONFLICT)writeFileSync('shared.txt',`${title}\n`);
+  if(env.MOCK_APPEND_TASK && title.startsWith(env.MOCK_APPEND_TASK))appendFileSync('tasks.md','\n## Phase 9: Convergence\n- [ ] T099 Appended by a task\n');
   if(env.MOCK_SELF_COMMIT)spawnSync('git',['-c','commit.gpgsign=false','commit','-qam','self commit'],{stdio:'ignore'});
 }
 if(env.MOCK_TOUCH_PROTECTED){mkdirSync('.orchestra',{recursive:true});writeFileSync('.orchestra/config.json','bad');}
